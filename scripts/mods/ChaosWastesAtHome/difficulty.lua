@@ -2,6 +2,7 @@ local mod = get_mod("ChaosWastesAtHome")
 
 local DangerSettings = require("scripts/settings/difficulty/danger_settings")
 local HavocSettings = require("scripts/settings/havoc_settings")
+local CircumstanceTemplates = require("scripts/settings/circumstance/circumstance_templates")
 
 -- The run's difficulty ladder.
 --
@@ -152,13 +153,20 @@ difficulty.build_havoc_data = function (rank, mission_name)
 	local faction = HavocSettings.factions[math.random(#HavocSettings.factions)]
 	local circumstances = _roll_distinct(HavocSettings.circumstances, NUM_ROLLED_CIRCUMSTANCES)
 
-	-- A theme is forced from rank 5 upward and the run only enters Havoc at
-	-- 25, so there is always one. Its harsher second variant comes in at the
-	-- same rank the Fading Light escalates.
-	local per_theme = HavocSettings.circumstances_per_theme[theme]
 	local tier = rank >= FADING_LIGHT_TIER_2_RANK and 2 or 1
 
-	if per_theme then
+	-- The theme circumstance (hunting grounds, ventilation purge, toxic gas)
+	-- is rolled rather than guaranteed, so not every Havoc mission carries an
+	-- environmental hazard on top of its modifiers. Its harsher second variant
+	-- comes in at the same rank the Fading Light escalates.
+	--
+	-- The theme *name* still goes into havoc_data either way: the field is
+	-- positional and must stay well-formed, and it is only parsed, never acted
+	-- on -- the hazard itself comes from the circumstance we may have skipped.
+	local theme_chance = mod:get("havoc_theme_chance") or 100
+	local per_theme = HavocSettings.circumstances_per_theme[theme]
+
+	if per_theme and (theme_chance >= 100 or theme_chance > 0 and math.random(1, 100) <= theme_chance) then
 		circumstances[#circumstances + 1] = per_theme[tier] or per_theme[1]
 	end
 
@@ -177,7 +185,51 @@ difficulty.build_havoc_data = function (rank, mission_name)
 	mod:debug_log("havoc rank", rank, "theme", theme, "faction", faction,
 		"circumstances", table.concat(circumstances, ", "))
 
-	return data, challenge, resistance
+	return data, challenge, resistance, circumstances
+end
+
+-- Player-facing names for a list of circumstance ids, so the picker can show
+-- what a Havoc mission actually rolled rather than just its rank. Havoc
+-- circumstance templates are folded into the global CircumstanceTemplates and
+-- each carries a ui.display_name loc key; anything without one falls back to
+-- its raw id, which is still more use than showing nothing.
+difficulty.describe_circumstances = function (circumstances)
+	if not circumstances or #circumstances == 0 then
+		return nil
+	end
+
+	local names = {}
+
+	-- Fading Light is on every Havoc mission at a rank-determined tier, so
+	-- listing it on all three cards tells you nothing about which to pick.
+	local skip = {
+		[FADING_LIGHT[1]] = true,
+		[FADING_LIGHT[2]] = true,
+	}
+
+	for _, id in ipairs(circumstances) do
+		if not skip[id] then
+			local template = CircumstanceTemplates[id]
+			local loc_key = template and template.ui and template.ui.display_name
+			local label = id
+
+			if loc_key then
+				local ok, localized = pcall(Localize, loc_key)
+
+				if ok and localized and localized ~= "" and not string.starts_with(localized, "<") then
+					label = localized
+				end
+			end
+
+			names[#names + 1] = label
+		end
+	end
+
+	if #names == 0 then
+		return nil
+	end
+
+	return table.concat(names, ", ")
 end
 
 difficulty.describe = function (params)

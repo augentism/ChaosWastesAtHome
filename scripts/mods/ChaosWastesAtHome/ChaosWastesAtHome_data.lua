@@ -47,6 +47,18 @@ return {
 				default_value = true,
 			},
 			{
+				setting_id    = "end_screen_extra_seconds",
+				type          = "numeric",
+				default_value = 30,
+				range         = { 0, 180 },
+			},
+			{
+				setting_id    = "havoc_theme_chance",
+				type          = "numeric",
+				default_value = 50,
+				range         = { 0, 100 },
+			},
+			{
 				setting_id    = "debug_logging",
 				type          = "checkbox",
 				default_value = false,

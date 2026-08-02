@@ -12,6 +12,18 @@ return {
 	difficulty_ramp_description = {
 		en = "Each mission in a run is one rung harder than the last: up through the normal difficulties to Auric, then into Havoc at rank 25 and +5 per mission. Havoc missions roll two random modifiers and always carry the Emperor's Fading Light, which reaches its second tier at rank 30. Turn off to keep every mission at the run's starting difficulty.",
 	},
+	end_screen_extra_seconds = {
+		en = "Extra seconds on the end screen",
+	},
+	end_screen_extra_seconds_description = {
+		en = "Adds time before the end-of-round screen sends you on, so there is room to read the three missions and choose. The countdown on the continue button reflects the extra time. Only applies during a run; 0 keeps the stock timing.",
+	},
+	havoc_theme_chance = {
+		en = "Havoc theme circumstance chance (%%)",
+	},
+	havoc_theme_chance_description = {
+		en = "How often a Havoc mission also gets its environmental theme - hunting grounds, ventilation purge or toxic gas - on top of its two rolled modifiers. 0 never, 100 always.",
+	},
 	debug_logging = {
 		en = "Debug logging",
 	},
@@ -227,6 +239,9 @@ return {
 	},
 	command_cw_status = {
 		en = "show how many buffs this mission has handed out",
+	},
+	conflict_auto_restart = {
+		en = "Chaos Wastes at Home: TrueSoloQoL's auto-restart is on, so losing will restart the mission instead of ending your run. Turn it off for runs to be loseable.",
 	},
 	command_not_active = {
 		en = "Chaos Wastes at Home is not active - it only runs in solo missions.",

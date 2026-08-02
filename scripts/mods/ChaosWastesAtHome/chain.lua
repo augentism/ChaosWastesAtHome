@@ -45,11 +45,14 @@ end
 -- the chain matches. Kept in one place because ramping difficulty later means
 -- changing only this function.
 chain.current_params = function ()
-	local difficulty = Managers.state and Managers.state.difficulty
+	-- Named difficulty_manager, not difficulty: this file imports a module
+	-- called `difficulty`, and a local of that name here silently shadows it
+	-- for the rest of the function.
+	local difficulty_manager = Managers.state and Managers.state.difficulty
 	local circumstance = Managers.state and Managers.state.circumstance
 	local mission_manager = Managers.state and Managers.state.mission
 
-	if not difficulty then
+	if not difficulty_manager then
 		return nil
 	end
 
@@ -60,8 +63,8 @@ chain.current_params = function ()
 	-- climbing silently until a base-game table indexed by difficulty runs off
 	-- its end (health stations crash at 6). The initial values are the run's
 	-- true baseline, and the circumstance then applies once, as designed.
-	local ok_c, challenge = pcall(difficulty.get_initial_challenge, difficulty)
-	local ok_r, resistance = pcall(difficulty.get_initial_resistance, difficulty)
+	local ok_c, challenge = pcall(difficulty_manager.get_initial_challenge, difficulty_manager)
+	local ok_r, resistance = pcall(difficulty_manager.get_initial_resistance, difficulty_manager)
 
 	if not ok_c or not ok_r then
 		return nil
@@ -118,10 +121,20 @@ end
 
 -- Three distinct missions at the run's difficulty and circumstance, excluding
 -- the one just played so the chain always moves somewhere new.
+chain.describe_params = function (params)
+	return difficulty.describe(params)
+end
+
 chain.roll_options = function (params)
 	params = params or chain.current_params()
 
 	if not params then
+		-- Reached when the end screen has no stored params and the difficulty
+		-- manager is already destroyed, so nothing can be recomputed. Worth
+		-- naming, because the symptom (an empty roll) looks identical to
+		-- having no eligible missions.
+		mod:error("cannot roll missions: no run difficulty recorded and none readable now")
+
 		return nil
 	end
 
@@ -152,13 +165,15 @@ chain.roll_options = function (params)
 			-- Havoc missions carry their whole configuration in havoc_data --
 			-- rank, theme, faction, circumstances -- and the mechanism reads
 			-- challenge/resistance from there, so the two are built together.
-			local havoc_data, challenge, resistance = difficulty.build_havoc_data(target.havoc_rank, mission_name)
+			local havoc_data, challenge, resistance, circumstances =
+				difficulty.build_havoc_data(target.havoc_rank, mission_name)
 
 			option = {
 				mission_name = mission_name,
 				challenge = challenge,
 				resistance = resistance,
 				havoc_data = havoc_data,
+				modifiers_label = difficulty.describe_circumstances(circumstances),
 			}
 		else
 			option = {

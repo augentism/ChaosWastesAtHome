@@ -12,6 +12,7 @@ local HOST_TYPES = MatchmakingConstants.HOST_TYPES
 
 local MechanismAdventure = require("scripts/managers/mechanism/mechanisms/mechanism_adventure")
 local StateGameScore = require("scripts/game_states/game/state_game_score")
+local ProgressionManager = require("scripts/managers/progression/progression_manager")
 
 local shim = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/game_mode_shim")
 local triggers = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/triggers")
@@ -36,6 +37,7 @@ local constructing = false
 -- assignment writing to a global instead.
 local restored_this_mission = false
 local capture_accum = 0
+local params_this_mission = false
 
 -- Error text can contain a literal '%', which crashes the logging path when it
 -- gets re-formatted downstream.
@@ -77,6 +79,37 @@ function mod:debug_log(...)
 	end
 
 	mod:info(_escape(message))
+end
+
+-- TrueSoloQoL's auto-restart hooks evaluate_end_conditions and, on a failure,
+-- calls restart_level() and returns false instead of letting the mission end.
+-- That silently breaks this mod's central rule that losing ends the run: you
+-- would simply respawn into the same mission and the chain would never break.
+--
+-- Not something to fix from here -- it is the other mod doing exactly what it
+-- says -- but the interaction is invisible unless someone points at it, so say
+-- it once per session rather than letting a run quietly become unloseable.
+local warned_about_conflicts = false
+
+local function _warn_about_conflicts()
+	if warned_about_conflicts then
+		return
+	end
+
+	warned_about_conflicts = true
+
+	local true_solo = get_mod and get_mod("TrueSoloQoL")
+
+	if not true_solo then
+		return
+	end
+
+	local ok, auto_restart = pcall(true_solo.get, true_solo, "auto_restart")
+
+	if ok and auto_restart then
+		mod:echo(mod:localize("conflict_auto_restart"))
+		mod:info("TrueSoloQoL auto_restart is enabled - losing will restart the mission instead of ending the run")
+	end
 end
 
 -- Singleplay only, and not negotiable. On a hosted session the buff system
@@ -156,6 +189,8 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 
 	triggers.reset()
 
+	_warn_about_conflicts()
+
 	mod:info("Mortis buff system active in game mode '%s'", _escape(game_mode_name))
 end)
 
@@ -225,8 +260,9 @@ mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (s
 	restored_this_mission = false
 	capture_accum = 0
 
-	-- Cleared so the next mission recomputes its rung from live difficulty.
-	run.state().params = nil
+	-- Only the flag: run.state().params must survive teardown for the end
+	-- screen to roll the next mission's options from.
+	params_this_mission = false
 
 	triggers.reset()
 end)
@@ -269,6 +305,32 @@ mod:register_view({
 		close_previous = false,
 	},
 })
+
+-- Buys time on the end screen so the picker can actually be read.
+--
+-- One hook covers both halves of the timeout because both read the same value:
+-- StateGameScore.update compares it against server time to fire game_score_done,
+-- and EndView renders the countdown on the continue button from it. Extending
+-- it here keeps the displayed timer honest instead of leaving it counting down
+-- to a deadline that no longer applies.
+--
+-- Only while a run is live -- a plain mission keeps the stock pacing.
+mod:hook(ProgressionManager, "game_score_end_time", function (func, self)
+	local end_time = func(self)
+
+	if not end_time or not run.is_active() then
+		return end_time
+	end
+
+	local extra_seconds = mod:get("end_screen_extra_seconds") or 0
+
+	if extra_seconds <= 0 then
+		return end_time
+	end
+
+	-- The accessor returns milliseconds.
+	return end_time + extra_seconds * 1000
+end)
 
 -- Offer the next mission when the end screen opens on a won round. A loss is
 -- the end of the run, so no picker.
@@ -397,11 +459,24 @@ local function _update_run()
 		state.missions_completed = state.missions_completed or 0
 	end
 
-	-- Refreshed each mission, not latched per run: with the ramp on, the next
-	-- rung is computed from what is being played right now, so a stale value
-	-- would freeze the run at its starting difficulty.
-	if not state.params then
-		state.params = chain.current_params()
+	-- Refreshed once per mission while the mission is live, and deliberately
+	-- NOT cleared at teardown.
+	--
+	-- Two constraints pull against each other: the ramp needs this to follow
+	-- the mission actually being played, but the end screen reads it after the
+	-- game mode is gone -- and once Managers.state.difficulty is destroyed it
+	-- cannot be recomputed. Refreshing in-mission and letting the value
+	-- outlive the mission satisfies both; clearing it on destroy left the
+	-- picker with nothing to roll from.
+	if not params_this_mission then
+		local params = chain.current_params()
+
+		if params then
+			state.params = params
+			params_this_mission = true
+
+			mod:debug_log("run difficulty for this mission:", chain.describe_params(params))
+		end
 	end
 
 	if not restored_this_mission and run.should_restore() then

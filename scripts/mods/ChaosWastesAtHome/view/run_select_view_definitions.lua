@@ -3,7 +3,7 @@ local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 local UIFontSettings = require("scripts/managers/ui/ui_font_settings")
 
 local PANEL_WIDTH = 420
-local OPTION_HEIGHT = 96
+local OPTION_HEIGHT = 132
 local OPTION_SPACING = 12
 local NUM_OPTIONS = 3
 
@@ -84,9 +84,23 @@ local function _option_widget(scenegraph_id)
 				font_size = 16,
 				text_horizontal_alignment = "left",
 				text_vertical_alignment = "top",
-				offset = { 20, 48, 4 },
-				size = { PANEL_WIDTH - 40, 40 },
+				offset = { 20, 46, 4 },
+				size = { PANEL_WIDTH - 40, 22 },
 				text_color = { 255, 190, 190, 190 },
+			},
+		},
+		{
+			pass_type = "text",
+			value_id = "modifiers",
+			style = {
+				font_type = "proxima_nova_medium",
+				font_size = 14,
+				text_horizontal_alignment = "left",
+				text_vertical_alignment = "top",
+				word_wrap = true,
+				offset = { 20, 70, 4 },
+				size = { PANEL_WIDTH - 40, 56 },
+				text_color = { 255, 150, 140, 120 },
 			},
 		},
 	}, scenegraph_id)

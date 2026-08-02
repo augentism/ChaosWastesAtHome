@@ -37,6 +37,7 @@ RunSelectView.on_enter = function (self)
 		if option then
 			widget.content.title = chain.mission_display_name(option.mission_name)
 			widget.content.subtitle = option.difficulty_label or mod:localize("picker_option_subtitle")
+			widget.content.modifiers = option.modifiers_label or ""
 			widget.content.hotspot.pressed_callback = callback(self, "_cb_option_pressed", i)
 			widget.visible = true
 		else
