@@ -13,6 +13,7 @@ local HOST_TYPES = MatchmakingConstants.HOST_TYPES
 local MechanismAdventure = require("scripts/managers/mechanism/mechanisms/mechanism_adventure")
 local StateGameScore = require("scripts/game_states/game/state_game_score")
 local ProgressionManager = require("scripts/managers/progression/progression_manager")
+local MultiplayerSessionManager = require("scripts/managers/multiplayer/multiplayer_session_manager")
 
 local shim = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/game_mode_shim")
 local triggers = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/triggers")
@@ -400,40 +401,48 @@ end)
 -- Hooked here rather than on MechanismManager.trigger_event because that is a
 -- generic dispatcher for every mechanism event in the game; this is the one
 -- function that actually means "the end screen is done".
-mod:hook_safe(MechanismAdventure, "game_score_done", function (self)
+-- Moves the chosen mission from "selected" to "queued for the hub". Shared,
+-- because the end screen has two exits and they do not meet: the timer path
+-- goes through game_score_done, while pressing continue calls
+-- multiplayer_session:leave("skip_end_of_round") and never touches the
+-- mechanism event at all.
+local function _queue_next_mission(via)
 	local next_mission = run.state().next_mission
 
 	if not next_mission then
+		return false
+	end
+
+	run.state().next_mission = nil
+	run.state().pending_launch = next_mission
+	run.state().missions_completed = run.state().missions_completed + 1
+
+	run.arm_restore()
+
+	mod:debug_log("queued launch through hub:", next_mission.mission_name,
+		"| via", via, "| run depth now", run.state().missions_completed)
+
+	if Managers.ui and Managers.ui:view_active(RUN_SELECT_VIEW) then
+		Managers.ui:close_view(RUN_SELECT_VIEW)
+	end
+
+	return true
+end
+
+-- Pressing continue on the end screen leaves the session directly. The leave
+-- still happens -- we are not trying to keep the session alive -- we just
+-- record the choice first, so the hub relaunch picks it up exactly as it does
+-- on the timer path.
+mod:hook_safe(MultiplayerSessionManager, "leave", function (self, reason)
+	if reason ~= "skip_end_of_round" then
 		return
 	end
 
-	-- Hand off to the hub rather than launching here.
-	--
-	-- Launching straight from the end screen does not work: chain.launch has
-	-- to reset the multiplayer session first, and its wait-for-teardown
-	-- condition (_session_boot.leaving_game_session) is written for launching
-	-- from inside live gameplay. At end of round the session is already being
-	-- torn down, that flag never flips, the promise polls forever, and the
-	-- game completes its normal exit while change_mechanism never runs --
-	-- which is exactly the "sent back to the Morningstar" symptom.
-	--
-	-- So we let the stock exit happen and relaunch once the hub is up, which
-	-- is the path SoloPlay itself uses. Costs a brief Morningstar transit.
-	run.state().next_mission = nil
-	run.state().pending_launch = next_mission
+	_queue_next_mission("continue pressed")
+end)
 
-	-- Arms the carry-over for the mission we are about to launch. Without
-	-- this the snapshot is inert, which is what keeps the generating mission
-	-- from re-applying its own buffs.
-	run.arm_restore()
-	run.state().missions_completed = run.state().missions_completed + 1
-
-	mod:debug_log("queued launch through hub:", next_mission.mission_name,
-		"| run depth now", run.state().missions_completed)
-
-	if Managers.ui:view_active(RUN_SELECT_VIEW) then
-		Managers.ui:close_view(RUN_SELECT_VIEW)
-	end
+mod:hook_safe(MechanismAdventure, "game_score_done", function (self)
+	_queue_next_mission("end screen timed out")
 end)
 
 -- Fires the queued mission once the hub has settled. Polled rather than hooked
