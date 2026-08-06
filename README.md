@@ -4,6 +4,14 @@ Brings the Mortis Trials buff system into regular **solo** missions. You pick a
 buff family when you spawn, then earn family buffs and legendary card picks as
 you play, driven by whatever triggers you turn on.
 
+## Installation
+
+1. Click on Code in the top right and download the zip
+2. Rename the folder inside the zip to ChaosWastesAtHome
+3. Install ChaosWastesAtHome into your mod folder like you would any other mod
+4. Add ChaosWastesAtHome to your mod_load_order.txt
+5. You're done. to launch, just launch any solo play mission. Should just work.
+
 ## How it works
 
 Almost none of this is reimplemented. Fatshark's mission-buffs system is
