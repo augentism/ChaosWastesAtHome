@@ -12,6 +12,12 @@ return {
 	difficulty_ramp_description = {
 		en = "Each mission in a run is one rung harder than the last: up through the normal difficulties to Auric, then into Havoc at rank 25 and +5 per mission. Havoc missions roll two random modifiers and always carry the Emperor's Fading Light, which reaches its second tier at rank 30. Turn off to keep every mission at the run's starting difficulty.",
 	},
+	preload_horde_assets = {
+		en = "Load Mortis assets",
+	},
+	preload_horde_assets_description = {
+		en = "Loads the Mortis mission package so buff icons and buff particle effects render properly. Without it the cards show placeholders and buff effects are skipped. Measured at around 3.5 seconds, paid once per run rather than per mission. Turn off if you would rather have the faster load than the artwork.",
+	},
 	end_screen_extra_seconds = {
 		en = "Extra seconds on the end screen",
 	},

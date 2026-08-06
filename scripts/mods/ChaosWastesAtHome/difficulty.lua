@@ -3,6 +3,7 @@ local mod = get_mod("ChaosWastesAtHome")
 local DangerSettings = require("scripts/settings/difficulty/danger_settings")
 local HavocSettings = require("scripts/settings/havoc_settings")
 local CircumstanceTemplates = require("scripts/settings/circumstance/circumstance_templates")
+local HavocModifierConfig = require("scripts/settings/havoc/havoc_modifier_config")
 
 -- The run's difficulty ladder.
 --
@@ -128,6 +129,50 @@ difficulty.next = function (current)
 	}
 end
 
+-- The modifier loadout for a Havoc rank.
+--
+-- HavocModifierConfig is indexed by rank, and each entry lists the modifiers
+-- introduced or upgraded at that rank -- so the active set is everything up to
+-- your rank, taking the highest level seen for each. Rank 25 works out to 18
+-- modifiers around level 3-4; rank 40 to the same 18 at level 5.
+--
+-- These are not rolled. Two players at the same Havoc rank face the same
+-- modifiers; only the circumstances vary. Deriving them from the game's own
+-- table rather than inventing a curve is what makes a mod-launched Havoc
+-- mission as hard as the real thing.
+local function _modifiers_for_rank(rank)
+	local levels = {}
+	local highest = math.min(rank, #HavocModifierConfig)
+
+	for i = 1, highest do
+		local entry = HavocModifierConfig[i]
+
+		if entry then
+			for name, level in pairs(entry) do
+				if not levels[name] or levels[name] < level then
+					levels[name] = level
+				end
+			end
+		end
+	end
+
+	local parts = {}
+	local lookup = NetworkLookup and NetworkLookup.havoc_modifiers
+
+	for name, level in pairs(levels) do
+		local id = lookup and lookup[name]
+
+		if id then
+			-- "id.level", the encoding SoloPlay and the mechanism both expect.
+			parts[#parts + 1] = string.format("%d.%d", id, level)
+		else
+			mod:debug_log("no network id for havoc modifier", name, "- skipping")
+		end
+	end
+
+	return table.concat(parts, ":"), #parts
+end
+
 local function _roll_distinct(pool, count)
 	local remaining = table.shallow_copy(pool)
 	local picked = {}
@@ -172,18 +217,21 @@ difficulty.build_havoc_data = function (rank, mission_name)
 
 	circumstances[#circumstances + 1] = FADING_LIGHT[tier]
 
+	local modifiers, modifier_count = _modifiers_for_rank(rank)
+
 	local data = string.format("%s;%d;%s;%s;%s;%s;%s;%s",
 		mission_name,
 		rank,
 		theme,
 		faction,
 		table.concat(circumstances, ":"),
-		"",
+		modifiers,
 		challenge,
 		resistance)
 
 	mod:debug_log("havoc rank", rank, "theme", theme, "faction", faction,
-		"circumstances", table.concat(circumstances, ", "))
+		"| modifiers:", modifier_count,
+		"| circumstances:", table.concat(circumstances, ", "))
 
 	return data, challenge, resistance, circumstances
 end

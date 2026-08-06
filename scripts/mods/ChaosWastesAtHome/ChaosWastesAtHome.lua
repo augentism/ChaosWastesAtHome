@@ -19,6 +19,9 @@ local triggers = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome
 local pause = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/pause")
 local run = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/run")
 local chain = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/chain")
+local particle_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/particle_guard")
+local spawn_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/spawn_guard")
+local asset_loader = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/asset_loader")
 
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
 
@@ -112,6 +115,9 @@ local function _warn_about_conflicts()
 	end
 end
 
+particle_guard.install()
+spawn_guard.install()
+
 -- Singleplay only, and not negotiable. On a hosted session the buff system
 -- sends rpc_client_mission_buffs_* to every remote player, and a client
 -- running the stock MissionBuffsManager has never registered those events --
@@ -188,6 +194,7 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 	mod.game_mode = self
 
 	triggers.reset()
+	asset_loader.request()
 
 	_warn_about_conflicts()
 
@@ -220,6 +227,10 @@ mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_dat
 	-- filters the priority and regular family pools through it as well. Both
 	-- read it back via manager:get_buffs_to_exclude(), and both run after this
 	-- point -- pool init at spawn, the family pools during our restore.
+	-- Only already-owned buffs are excluded. Buffs whose particle effects are
+	-- missing stay in the pool: particle_guard makes those effects render
+	-- nothing instead of crashing, so there is no reason to cost the player
+	-- the buff itself.
 	local exclude = {}
 	local carried = 0
 
@@ -598,4 +609,18 @@ mod:command("cw_status", mod:localize("command_cw_status"), function ()
 
 	mod:echo(string.format("Chaos Wastes at Home: %d family buffs, %d legendary picks granted this mission",
 		stats.family_granted, stats.legendary_granted))
+
+	local missing = particle_guard.missing_effects()
+
+	if #missing > 0 then
+		mod:echo(string.format("%d particle effect(s) unavailable and silently skipped: %s",
+			#missing, table.concat(missing, ", ")))
+	end
+
+	local spawn_failures = spawn_guard.failure_count()
+
+	if spawn_failures > 0 then
+		mod:echo(string.format("%d horde spawn quer%s failed and were skipped",
+			spawn_failures, spawn_failures == 1 and "y" or "ies"))
+	end
 end)

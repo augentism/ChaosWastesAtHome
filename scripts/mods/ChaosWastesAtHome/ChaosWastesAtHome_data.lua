@@ -47,6 +47,11 @@ return {
 				default_value = true,
 			},
 			{
+				setting_id    = "preload_horde_assets",
+				type          = "checkbox",
+				default_value = true,
+			},
+			{
 				setting_id    = "end_screen_extra_seconds",
 				type          = "numeric",
 				default_value = 30,
