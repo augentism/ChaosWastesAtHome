@@ -367,6 +367,22 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 		return
 	end
 
+	-- Pre-select the first option, rather than treating "nothing chosen" as a
+	-- decision to end the run.
+	--
+	-- The end screen can finish before a click lands -- spamming continue
+	-- fires game_score_done early, the interception sees no selection, the
+	-- stock exit runs, and the click that arrives a moment later sets a value
+	-- nothing will ever read. The run dies to a race rather than to a choice.
+	--
+	-- Selecting up front removes the race outright instead of papering over
+	-- it: the state is already correct when the screen opens, so it no longer
+	-- matters whether the player clicks, clicks late, or never clicks at all.
+	-- Clicking a different card simply replaces the default.
+	run.state().next_mission = options[1]
+
+	mod:debug_log("defaulting to", options[1].mission_name, "until another card is chosen")
+
 	Managers.ui:open_view(RUN_SELECT_VIEW, nil, nil, nil, nil, {
 		options = options,
 	})

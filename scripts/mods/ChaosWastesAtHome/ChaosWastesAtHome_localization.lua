@@ -206,6 +206,9 @@ return {
 	picker_subtitle = {
 		en = "Choose your next mission. Your buffs carry over.",
 	},
+	picker_default_note = {
+		en = "The first is chosen unless you pick another.",
+	},
 	picker_option_subtitle = {
 		en = "Same difficulty and conditions",
 	},

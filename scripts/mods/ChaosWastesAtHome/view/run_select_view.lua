@@ -39,10 +39,25 @@ RunSelectView.on_enter = function (self)
 			widget.content.subtitle = option.difficulty_label or mod:localize("picker_option_subtitle")
 			widget.content.modifiers = option.modifiers_label or ""
 			widget.content.hotspot.pressed_callback = callback(self, "_cb_option_pressed", i)
+
+			-- The first card is already the run's selection when this view
+			-- opens, so it has to look selected. An invisible default would be
+			-- worse than none: the run would continue somewhere the player had
+			-- no idea they had agreed to.
+			widget.content.hotspot.is_selected = i == 1
+
 			widget.visible = true
 		else
 			widget.visible = false
 		end
+	end
+
+	local default_option = self._options[1]
+
+	if default_option then
+		self._selected_index = 1
+		widgets_by_name.subtitle.content.text =
+			mod:localize("picker_selected", chain.mission_display_name(default_option.mission_name))
 	end
 end
 
