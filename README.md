@@ -1,110 +1,90 @@
 # Chaos Wastes at Home
 
-Brings the Mortis Trials buff system into regular **solo** missions. You pick a
-buff family when you spawn, then earn family buffs and legendary card picks as
-you play, driven by whatever triggers you turn on.
+Turns regular **solo** Darktide missions into a Chaos Wastes–style run: you pick
+a buff family when you spawn, earn Mortis Trials buffs as you play, and at the
+end of each mission choose one of three next missions. Your buffs carry over.
+The difficulty climbs every mission. Losing ends the run.
 
-## Installation
+## Requirements
 
-1. Click on Code in the top right and download the zip
-2. Rename the folder inside the zip to ChaosWastesAtHome
-3. Install ChaosWastesAtHome into your mod folder like you would any other mod
-4. Add ChaosWastesAtHome to your mod_load_order.txt
-5. You're done. to launch, just launch any solo play mission. Should just work.
-
-## How it works
-
-Almost none of this is reimplemented. Fatshark's mission-buffs system is
-already constructed in every non-hub mission — `GameModeCoopCompleteObjective._init_buff_system`
-builds a `MissionBuffsManager`, the `hordes_buff_*` templates are registered
-globally in `BuffTemplates`, and the `ConstantElementMissionBuffs` card UI is
-loaded for every `in_mission` session. What a regular mission gets is the plain
-base manager, which can grant buffs but has no selector, no pools and no UI.
-
-The mod swaps that one object for `HordeMissionBuffsManager`, the survival
-subclass. That brings the rest of the system with it: buff families, legendary
-pools with per-archetype/ability/talent filtering, the three-card choice UI and
-its timeout, buff-received notifications, and persistence across downs and
-respawns. It also self-starts — the coop game mode already fires
-`mission_buffs_event_player_spawned`, which is what creates the opening family
-choice.
-
-Three things the mod has to supply:
-
-1. **A game-mode shim** (`game_mode_shim.lua`). The buff system reaches into the
-   game mode for wave/island bookkeeping that a regular mission does not have:
-   `get_current_wave`, `get_last_wave_completed`, `get_islands_completed`,
-   `is_wave_in_progress`, `can_start_wave_one`,
-   `wait_for_players_to_choose_family` and the `_waves_completed` field. The
-   stubs report "wave 0", which is the state Mortis itself runs in before wave
-   1: notifications are never gated on a between-wave pause, and the
-   "WAVE N COMPLETED" banner never renders.
-
-2. **One UI gate hook**. `ConstantElementMissionBuffs._is_player_in_mission`
-   hard-codes `game_mode == "survival"`; without overriding it the element
-   force-inactivates itself every frame.
-
-3. **A backend bypass**. `HordeMissionBuffsManager` asks the title backend for
-   family weights and a deactivated-buff list. Solo has no session to ask, so
-   the mod installs the same defaults the stock failure path uses (even
-   weights, nothing excluded) and skips the request.
-
-## Triggers
-
-Mortis paces buffs off waves. A regular mission has none, so grants are driven
-by sources you enable in the mod options. Each has its own roll chance and its
-own choice of what it hands out; if that kind is used up for the mission, the
-other kind is granted instead.
-
-| Source | Fires on | Default |
-|---|---|---|
-| Mission objectives | any objective completing (side missions optional) | on, legendary pick |
-| Kills | a configurable count of all / elite+special / special / monster kills | off, family buff |
-| Elapsed time | a fixed interval in minutes | off, family buff |
-| Event clears | the last active terror event ending | off, family buff |
-
-Per-mission budget defaults to Mortis's own island economy: 3 legendary card
-picks and 7 family buffs. Set either to 0 to disable that kind entirely.
-
-The objective trigger is the recommended default — it paces with the mission
-and needs no per-map tuning. The event trigger watches the terror-event count
-drop to zero rather than hooking `stop_event`, because events normally complete
-inside `TerrorEventManager.update`; `stop_event` is only the forced-stop path.
-
-## Solo only
-
-The mod refuses to activate unless the session is `HOST_TYPES.singleplay`. This
-is deliberate and not configurable: on a hosted session the buff system sends
-`rpc_client_mission_buffs_*` to every remote player, and a client running the
-stock `MissionBuffsManager` has never registered those events. Enabling this
-with other people in the session would break their game, not just yours.
-
-Bots are unaffected — every path in the buff system checks
-`is_human_controlled()`.
-
-## Commands
-
-- `/cw_buff [family|legendary]` — grant one now, for testing.
-- `/cw_status` — how many of each this mission has handed out.
+- **Darktide Mod Framework**
+- **[SoloPlay](https://www.nexusmods.com/warhammer40kdarktide/mods/56)** — this
+  mod only activates in singleplay sessions, which is how SoloPlay hosts a
+  mission. It does nothing in matchmade or hosted games (see below).
 
 ## Install
 
-```bash
-python ChaosWastesAtHome/deploy.py
+1. Extract into `Warhammer 40,000 DARKTIDE/mods/` so you get
+   `mods/ChaosWastesAtHome/`.
+2. Add `ChaosWastesAtHome` to `mods/mod_load_order.txt`, or enable it through
+   Vortex. **A mod not listed there is silently never loaded.**
+
+## How a run works
+
+1. Start a solo mission as usual. On spawn you choose a **buff family** — the
+   same three-card screen Mortis Trials uses.
+2. As you play, you earn buffs. By default a completed objective grants a
+   legendary card pick; kills, a timer, and terror-event clears can also be
+   enabled as sources.
+3. Finish the mission and the end screen offers **three next missions**. Pick
+   one and you go straight there with your buffs intact. The first card is
+   pre-selected, so pressing continue keeps the run going.
+4. Each mission is one rung harder: up through the normal difficulties to
+   Auric, then Havoc 25, 30, 35, 40. Havoc missions roll two modifiers, carry
+   the Emperor's Fading Light, and scale their modifier loadout by rank exactly
+   as real Havoc does.
+5. **Dying ends the run.** So does quitting to the Morningstar, or ignoring the
+   picker.
+
+## Solo only, deliberately
+
+The mod refuses to run outside a singleplay session, and this is not
+configurable. The buff system sends network messages to every other player in
+the session, and a client without this mod has not registered them — enabling
+it in a hosted game would break other people's game, not just yours.
+
+## Options worth knowing
+
+Everything is in the mod options menu.
+
+| Option | Default | Notes |
+|---|---|---|
+| Ramp difficulty each mission | on | Turn off to keep the run at its starting difficulty |
+| Load Mortis assets | on | Needed for buff icons and effects to render; ~3.5s once per run |
+| Extra seconds on the end screen | 30 | Solo end screens are very short by default |
+| Havoc theme circumstance chance | 50% | Hunting grounds / ventilation purge / toxic gas |
+| Buffs per mission | 3 legendary, 7 family | Per mission, not per run — deep runs stack up fast |
+| Pause while choosing | on | Freezes gameplay while a buff card is up |
+| Debug logging | off | Turn on before reproducing a problem |
+
+There are also unbound keybinds under **Testing** to end a mission instantly as
+a win or a loss, for exercising the chain without playing a whole map.
+
+## Known issues
+
+- **Horde spawn crash.** A base-game spawn-point query can fail in solo play and
+  crash the game. It is not caused by this mod, but the mod now catches it and
+  skips that horde rather than letting it kill the session. `/cw_status` reports
+  how many times it happened.
+- **TrueSoloQoL's auto-restart** restarts a failed mission instead of letting it
+  end, which makes runs unloseable. The mod warns once in chat if it detects
+  this. Turn that setting off for runs to work properly.
+- Buff budgets are per mission, so long runs get very strong. Tuning welcome.
+
+## Reporting a problem
+
+Turn on **Debug logging**, reproduce it, then send the console log from:
+
+```
+%APPDATA%\Fatshark\Darktide\console_logs\
 ```
 
-Then add `ChaosWastesAtHome` to `mods/mod_load_order.txt`. That file is managed by
-Vortex on this machine, so add it through Vortex rather than editing the file
-by hand if you want the change to survive a Vortex deploy.
+Take the newest file. The log records every buff granted, every mission
+transition, and both guard counters, which is usually enough to identify the
+cause without a repro.
 
-## Caveats
+## Commands
 
-- A few hordes buffs assume horde-mode context (`hordes_buff_ogryn_basic_box_spawns_cluster`
-  is granted automatically to Ogryns with the box grenade;
-  `hordes_buff_damage_immunity_after_game_end` is survival end-of-run only).
-  They are harmless here but were written for a different mode.
-- Buff titles and descriptions resolve as `loc_<buff_name>_title` /
-  `_description` from the game's own localization, so they render the same as
-  they do in Mortis.
-- Enabling several triggers at once will hit the per-mission budget quickly.
-  The budget is the real balance lever, not the trigger count.
+- `/cw_status` — buffs granted this mission, plus any guard activity
+- `/cw_buff [family|legendary]` — grant one now
+- `/cw_win` / `/cw_lose` — end the current mission (testing)

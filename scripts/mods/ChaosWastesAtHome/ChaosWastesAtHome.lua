@@ -1,5 +1,7 @@
 local mod = get_mod("ChaosWastesAtHome")
 
+mod.version = "0.1.0"
+
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
 -- manager), so CLASS may not have them yet when mods load. Requiring pulls
@@ -448,31 +450,69 @@ end)
 -- Fires the queued mission once the hub has settled. Polled rather than hooked
 -- because "the hub is ready to launch from" is a state, not an event, and
 -- launching too early silently does nothing.
-local function _update_pending_launch()
+local hub_settle_accum = 0
+
+-- The four conditions below are the real gate; this is the margin for whatever
+-- they do not cover. Tested fine at 0.2s, but only on warm hub loads -- the
+-- crash this guards against appeared when the hub loaded slowly, which those
+-- runs never reproduced. 1s costs a second per hop and covers the case the
+-- testing could not.
+local HUB_SETTLE_SECONDS = 1
+
+-- Fires the queued mission once the hub is genuinely ready.
+--
+-- "Ready" is stricter than it looks. Being in the hub game mode only means the
+-- game mode object exists -- the hub may still be loading its level and its
+-- mechanism may still be mid-transition. Launching there calls
+-- multiplayer_session:reset(), which tears down Managers.state.extension while
+-- MechanismHub.wanted_transition is about to read it, and the game dies inside
+-- the engine's own transition rather than anywhere near this mod.
+--
+-- Hence four conditions plus a settle timer. The timer is the honest part: it
+-- is not possible to enumerate every manager the hub still needs, so requiring
+-- the conditions to hold continuously for a moment is what actually makes this
+-- safe, rather than a longer list of checks that might still miss one.
+local function _update_pending_launch(dt)
 	local state = run.state()
 
 	if not state.pending_launch then
+		hub_settle_accum = 0
+
 		return
 	end
 
 	local game_mode = Managers.state and Managers.state.game_mode
 	local game_mode_name = game_mode and game_mode:game_mode_name()
+	local session = Managers.multiplayer_session
+	local mechanism = Managers.mechanism
 
-	if game_mode_name ~= "hub" then
+	local ready = game_mode_name == "hub"
+		-- The exact field the crash tripped over: gameplay systems are up.
+		and Managers.state.extension ~= nil
+		and session ~= nil
+		and not session:is_booting_session()
+		and not session:is_leaving()
+		-- Not still swapping in from left_session.
+		and (not mechanism or mechanism:mechanism_name() == "hub")
+
+	if not ready then
+		hub_settle_accum = 0
+
 		return
 	end
 
-	local session = Managers.multiplayer_session
+	hub_settle_accum = hub_settle_accum + (dt or 0)
 
-	if not session or session:is_booting_session() or session:is_leaving() then
+	if hub_settle_accum < HUB_SETTLE_SECONDS then
 		return
 	end
 
 	local mission_context = state.pending_launch
 
 	state.pending_launch = nil
+	hub_settle_accum = 0
 
-	mod:debug_log("hub settled, launching queued mission", mission_context.mission_name)
+	mod:debug_log("hub settled for", HUB_SETTLE_SECONDS, "s, launching queued mission", mission_context.mission_name)
 
 	if not chain.launch(mission_context) then
 		run.reset("launch failed")
@@ -539,7 +579,7 @@ local function _update_run()
 end
 
 mod.update = function (dt)
-	_update_pending_launch()
+	_update_pending_launch(dt)
 	_update_run()
 	triggers.update(dt)
 	pause.update()
