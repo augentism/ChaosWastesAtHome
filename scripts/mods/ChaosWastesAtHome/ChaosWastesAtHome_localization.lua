@@ -6,6 +6,71 @@ return {
 		en = "Brings the Mortis Trials buff system into regular solo missions: pick a buff family on spawn, then earn family buffs and legendary card picks as you play. Singleplay sessions only.",
 	},
 
+	-- Buff toggle menu ------------------------------------------------------
+	open_buff_toggle_view = {
+		en = "Rollable buffs",
+	},
+	open_buff_toggle_view_description = {
+		en = "Opens a menu listing every buff that can be rolled, grouped by family and class. Everything is enabled by default; anything you switch off stops appearing in buff choices.",
+	},
+	buff_toggle_open_none = {
+		en = "...",
+	},
+	buff_toggle_open_now = {
+		en = "Open the menu",
+	},
+	buff_toggle_view_title = {
+		en = "Rollable Buffs",
+	},
+	buff_group_legendary = {
+		en = "Legendary",
+	},
+	buff_group_custom = {
+		en = "Custom",
+	},
+	buff_group_archetype = {
+		en = "Class: %s",
+	},
+	buff_state_on = {
+		en = "ON",
+	},
+	buff_state_off = {
+		en = "OFF",
+	},
+	buff_enable_all = {
+		en = "Enable all shown",
+	},
+	buff_disable_all = {
+		en = "Disable all shown",
+	},
+	buff_reset_all = {
+		en = "Re-enable everything",
+	},
+	buff_kind_family = {
+		en = "Family buff",
+	},
+	buff_kind_legendary = {
+		en = "Legendary buff",
+	},
+	buff_no_description = {
+		en = "No description available for this buff.",
+	},
+	buff_enable_this = {
+		en = "Enable this buff",
+	},
+	buff_disable_this = {
+		en = "Disable this buff",
+	},
+	buff_summary_all_on = {
+		en = "All buffs enabled.",
+	},
+	buff_summary_disabled = {
+		en = "%s buff(s) disabled and excluded from every roll.",
+	},
+	command_cw_buffs = {
+		en = "open the rollable-buffs menu",
+	},
+
 	difficulty_ramp = {
 		en = "Ramp difficulty each mission",
 	},
@@ -23,6 +88,12 @@ return {
 	},
 	end_screen_extra_seconds_description = {
 		en = "Adds time before the end-of-round screen sends you on, so there is room to read the three missions and choose. The countdown on the continue button reflects the extra time. Only applies during a run; 0 keeps the stock timing.",
+	},
+	custom_buff_weight = {
+		en = "Custom buff frequency",
+	},
+	custom_buff_weight_description = {
+		en = "How often buffs added by custom_buffs.lua come up in a legendary card pick, relative to the shipped categories (which sit around 1-5). 0 removes them entirely without deleting them.",
 	},
 	havoc_theme_chance = {
 		en = "Havoc theme circumstance chance (%%)",
@@ -45,7 +116,7 @@ return {
 		en = "Pause while choosing",
 	},
 	pause_on_choice_description = {
-		en = "Freeze gameplay while a buff choice is on screen, so reading the cards cannot get you killed. The card's own countdown keeps running and will still auto-pick if you take too long; the game resumes either way.",
+		en = "Freeze gameplay while a buff choice is on screen, so reading the cards cannot get you killed. The card's countdown is held for as long as the pause lasts, so nothing is auto-picked out from under you - take as long as you like. Turn this off to play with the stock 30 second timer instead.",
 	},
 	max_legendary_choices = {
 		en = "Legendary card picks",
@@ -248,6 +319,12 @@ return {
 	},
 	command_cw_status = {
 		en = "show how many buffs this mission has handed out",
+	},
+	command_cw_give = {
+		en = "grant one buff by name - /cw_give [name or search text]",
+	},
+	command_cw_verify = {
+		en = "check whether the custom buffs are attached and having an effect",
 	},
 	conflict_auto_restart = {
 		en = "Chaos Wastes at Home: TrueSoloQoL's auto-restart is on, so losing will restart the mission instead of ending your run. Turn it off for runs to be loseable.",

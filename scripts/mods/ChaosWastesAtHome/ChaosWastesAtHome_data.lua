@@ -41,6 +41,18 @@ return {
 	is_togglable = true,
 	options = {
 		widgets = {
+			-- A dropdown, not a button: DMF has no button widget type. Picking
+			-- "open" opens the view and on_setting_changed resets this to
+			-- "none" so the same entry can be picked again next time.
+			{
+				setting_id    = "open_buff_toggle_view",
+				type          = "dropdown",
+				default_value = "none",
+				options = {
+					{ text = "buff_toggle_open_none", value = "none" },
+					{ text = "buff_toggle_open_now",  value = "open" },
+				},
+			},
 			{
 				setting_id    = "difficulty_ramp",
 				type          = "checkbox",
@@ -56,6 +68,12 @@ return {
 				type          = "numeric",
 				default_value = 30,
 				range         = { 0, 180 },
+			},
+			{
+				setting_id    = "custom_buff_weight",
+				type          = "numeric",
+				default_value = 1,
+				range         = { 0, 10 },
 			},
 			{
 				setting_id    = "havoc_theme_chance",

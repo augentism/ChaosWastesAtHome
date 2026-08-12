@@ -1,6 +1,8 @@
 local mod = get_mod("ChaosWastesAtHome")
 
 local Breed = require("scripts/utilities/breed")
+local BuffTemplates = require("scripts/settings/buff/buff_templates")
+local HordesBuffsData = require("scripts/settings/buff/hordes_buffs/hordes_buffs_data")
 local MissionObjectiveSystem = require("scripts/extension_systems/mission_objective/mission_objective_system")
 local MinionDeathManager = require("scripts/managers/minion/minion_death_manager")
 
@@ -119,6 +121,76 @@ local function _has_family(player)
 	local ok, family = pcall(manager.get_buff_family_selected_by_player, manager, player)
 
 	return ok and family ~= nil
+end
+
+-- Name search, for the "I know roughly what it is called" case.
+--
+-- Searches HordesBuffsData rather than BuffTemplates: the latter holds every
+-- buff in the game, thousands of talent and weapon entries included, and none
+-- of those are meant to be handed out as mission buffs.
+triggers.find_buff_names = function (needle)
+	local matches = {}
+
+	for name in pairs(HordesBuffsData) do
+		if not needle or needle == "" or string.find(name, needle, 1, true) then
+			matches[#matches + 1] = name
+		end
+	end
+
+	table.sort(matches)
+
+	return matches
+end
+
+-- Grant one specific buff by name, bypassing the pools and the budget.
+--
+-- A testing tool, not a trigger: it does not touch the per-mission budget and
+-- does not roll. It does save to persistent data like a real grant, so the buff
+-- carries into the next mission of a run and stops being offered again.
+--
+-- Returns ok, reason -- the caller reports, this stays quiet.
+triggers.grant_named = function (buff_name)
+	if not buff_name or buff_name == "" then
+		return false, "no buff name given"
+	end
+
+	local manager = mod.manager
+	local handler = manager and manager._mission_buffs_handler
+
+	if not handler then
+		return false, "the buff system is not running"
+	end
+
+	local player = _local_player()
+
+	if not player or not player.player_unit then
+		return false, "no local player unit"
+	end
+
+	local template = BuffTemplates[buff_name]
+
+	if not template then
+		return false, string.format("no buff template called '%s'", buff_name)
+	end
+
+	-- Same trap as the custom buffs: a template with no name crashes on apply,
+	-- deep inside the buff extension. Cheap to close here for any template that
+	-- reaches this path, whoever defined it.
+	if not template.name then
+		template.name = buff_name
+	end
+
+	-- pcall because this is reachable from chat with arbitrary input, and the
+	-- failure modes downstream are hard errors rather than return values.
+	local ok, err = pcall(handler.give_buff_to_player, handler, player, buff_name, false, false)
+
+	if not ok then
+		return false, tostring(err)
+	end
+
+	mod:debug_log("granted '%s' by name", buff_name)
+
+	return true
 end
 
 triggers.grant_family = function ()

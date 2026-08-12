@@ -25,8 +25,11 @@ local chain = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/ch
 local particle_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/particle_guard")
 local spawn_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/spawn_guard")
 local asset_loader = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/asset_loader")
+local custom_buffs = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/custom_buffs")
+local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_pool")
 
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
+local BUFF_TOGGLE_VIEW = "chaos_wastes_buff_toggle_view"
 
 -- Set for the lifetime of a mission we have taken over; everything else in the
 -- mod treats a non-nil `mod.manager` as "the Mortis buff system is live".
@@ -120,6 +123,7 @@ end
 
 particle_guard.install()
 spawn_guard.install()
+custom_buffs.register()
 
 -- Singleplay only, and not negotiable. On a hosted session the buff system
 -- sends rpc_client_mission_buffs_* to every remote player, and a client
@@ -198,6 +202,12 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 
 	triggers.reset()
 	asset_loader.request()
+	custom_buffs.register_network_lookup()
+	-- Retried here because the load-time attempt declines at boot: the engine
+	-- module it hooks cannot be required until the game is further along.
+	custom_buffs.install_hooks()
+	custom_buffs.apply_weight()
+	custom_buffs.reset_counters()
 
 	_warn_about_conflicts()
 
@@ -213,6 +223,108 @@ end)
 -- the way the real callbacks do: this runs from inside init, before
 -- _players_needing_data_initialization exists. Setting the fields is enough --
 -- _manage_player_spawn checks them directly and proceeds.
+-- ---------------------------------------------------------------------------
+-- Legendary pool timing
+-- ---------------------------------------------------------------------------
+
+-- Restores the ordering our backend bypass accidentally removed.
+--
+-- The legendary pool is filtered by the player's EQUIPPED abilities:
+-- _get_valid_legendary_buffs_for_player_setup reads
+-- ability_extension:equipped_abilities() and indexes
+-- legendary_buffs[class].grenade_ability[<equipped blitz>]. Build it too early
+-- and that lookup answers with whatever the extension holds at that instant,
+-- which is how an Adamant with no shock mine ends up being offered
+-- hordes_buff_adamant_mine_explosion.
+--
+-- Stock Mortis never builds it at spawn. _manage_player_spawn checks whether
+-- the backend exclusion list has arrived, and on the first spawn it has not --
+-- so the player is parked in _players_needing_data_initialization and the pool
+-- is built later, from _manage_delayed_data_initialization_for_players, once
+-- the round trip finishes. We answer that request synchronously, so the list is
+-- already present on the very first spawn and the deferral never happens.
+--
+-- So we re-add a deferral of our own: hold the first call per player until the
+-- ability extension can actually answer, then let it through unchanged.
+local pending_pool_init = mod._pending_pool_init or {}
+
+mod._pending_pool_init = pending_pool_init
+
+-- A backstop, not a schedule. If abilities never resolve we would rather hand
+-- out a slightly wrong pool than no buffs at all for the whole mission.
+local POOL_INIT_TIMEOUT = 5
+
+local function _resolved_abilities(player)
+	local unit = player and player.player_unit
+
+	if not unit or not Unit.alive(unit) then
+		return nil
+	end
+
+	local extension = ScriptUnit.has_extension(unit, "ability_system")
+
+	if not extension then
+		return nil
+	end
+
+	local ok, abilities = pcall(extension.equipped_abilities, extension)
+
+	if not ok or type(abilities) ~= "table" then
+		return nil
+	end
+
+	-- Read exactly the way the selector reads them, so what is logged is what
+	-- the pool will be built from -- note grenade uses `name` and combat uses
+	-- `ability_group`.
+	local grenade = abilities.grenade_ability and abilities.grenade_ability.name
+	local combat = abilities.combat_ability and abilities.combat_ability.ability_group
+
+	if not grenade and not combat then
+		return nil
+	end
+
+	return { grenade = grenade, combat = combat }
+end
+
+mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self, player, is_respawn)
+	if mod.manager ~= self or not player then
+		return func(self, player, is_respawn)
+	end
+
+	local handler = self._mission_buffs_handler
+	local ok, has_pool = pcall(handler.does_player_have_legendary_buffs_pool, handler, player)
+
+	-- Only the call that would build the pool is held. Respawns and every later
+	-- call go straight through, so nothing else about spawn handling changes.
+	if not ok or has_pool then
+		return func(self, player, is_respawn)
+	end
+
+	local id = player:account_id()
+	local entry = pending_pool_init[id]
+
+	if not entry then
+		entry = { player = player, is_respawn = is_respawn, elapsed = 0, manager = self }
+		pending_pool_init[id] = entry
+	end
+
+	local abilities = _resolved_abilities(player)
+
+	if not abilities and entry.elapsed < POOL_INIT_TIMEOUT then
+		return
+	end
+
+	pending_pool_init[id] = nil
+
+	mod:info("building legendary pool for %s - blitz '%s', ability '%s'%s",
+		_escape(player:archetype_name()),
+		_escape(abilities and abilities.grenade or "unresolved"),
+		_escape(abilities and abilities.combat or "unresolved"),
+		abilities and "" or " (timed out)")
+
+	return func(self, player, entry.is_respawn)
+end)
+
 mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_data_initialization", function (func, self)
 	if not constructing then
 		return func(self)
@@ -244,13 +356,18 @@ mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_dat
 		end
 	end
 
+	-- Buffs switched off in the toggle view join the same list. Applied after
+	-- the carried ones and additively, so the two cannot clobber each other.
+	local switched_off = buff_pool.apply_exclusions(exclude)
+
 	self._backend_buffs_to_exclude = exclude
 	self._backend_weighted_randomization = {
 		buff_family_weights = {},
 	}
 
 	mod:debug_log("skipped the hordes backend request; using even family weights;",
-		carried, "buff(s) already owned this run excluded from the pools")
+		carried, "buff(s) already owned this run and", switched_off,
+		"switched off in the toggle menu excluded from the pools")
 end)
 
 mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (self)
@@ -284,12 +401,100 @@ end)
 -- The card UI is registered for every in_mission session and its package is
 -- loaded at UIManager init, so the only thing keeping it off screen here is
 -- this game-mode check. Everything below it is driven by generic events.
+-- Holds the choice countdown while the world is paused.
+--
+-- The card's timer is not gameplay time. StateGame feeds Managers.ui the raw
+-- frame dt rather than the gameplay timer -- which is exactly what makes the
+-- card still animate and accept clicks while the world is stopped -- so
+-- scaling "gameplay" to zero does nothing to the 30 seconds ticking away
+-- behind it. In solo there is nothing to race: the timer exists so a
+-- four-player game is not held hostage by one person reading a card.
+--
+-- Only _texts_timer is held. The original still runs, so the buff and blur
+-- timers keep driving their animations; the countdown is simply put back to
+-- where it was. Freezing the lot would stall the card's own presentation.
+--
+-- Scoped by pause.is_paused(), which is only true while an unresolved choice is
+-- up, so notifications and post-choice states are untouched. With "Pause while
+-- choosing" off, the stock 30-second auto-pick behaves exactly as before.
+mod:hook(ConstantElementMissionBuffs, "_update_timers_state", function (func, self, dt, ui_renderer)
+	local held = pause.is_paused() and self._texts_timer
+
+	func(self, dt, ui_renderer)
+
+	if held then
+		self._texts_timer = held
+		-- Kept in step with the current value: the pair is compared to detect
+		-- the countdown crossing a whole second, and leaving them apart would
+		-- re-fire that every frame.
+		self._previous_texts_timer = held
+	end
+end)
+
 mod:hook(ConstantElementMissionBuffs, "_is_player_in_mission", function (func, self)
 	if mod.manager and self._current_game_mode == "coop_complete_objective" then
 		return true
 	end
 
 	return func(self)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Buff toggle menu
+-- ---------------------------------------------------------------------------
+
+mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buff_toggle_view")
+mod:register_view({
+	view_name = BUFF_TOGGLE_VIEW,
+	view_settings = {
+		init_view_function = function (ingame_ui_context)
+			return true
+		end,
+		state_bound = true,
+		path = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buff_toggle_view",
+		class = "ChaosWastesBuffToggleView",
+		disable_game_world = false,
+		load_always = true,
+		load_in_hub = true,
+		game_world_blur = 1.1,
+	},
+	view_transitions = {},
+	view_options = {
+		-- The mod options view stays open underneath so closing this one returns
+		-- to it with its state intact. It cannot be seen or clicked meanwhile
+		-- because the view reports _pass_input and _pass_draw false.
+		close_all = false,
+		close_previous = false,
+	},
+})
+
+-- Opened from a dropdown because DMF has no button widget type:
+-- _type_template_map in dmf/modules/ui/options/mod_options.lua maps only
+-- header/group/checkbox/dropdown/keybind/numeric/text_input.
+--
+-- The dropdown resets itself afterwards with notify=false -- notify=true would
+-- re-enter this handler -- and the reset also makes the same entry pickable
+-- again, since the widget re-reads its displayed value from mod:get each frame.
+mod.on_setting_changed = function (setting_id)
+	if setting_id ~= "open_buff_toggle_view" then
+		return
+	end
+
+	if mod:get(setting_id) ~= "open" then
+		return
+	end
+
+	mod:set(setting_id, "none", false)
+
+	if Managers.ui and not Managers.ui:view_active(BUFF_TOGGLE_VIEW) then
+		Managers.ui:open_view(BUFF_TOGGLE_VIEW)
+	end
+end
+
+mod:command("cw_buffs", mod:localize("command_cw_buffs"), function ()
+	if Managers.ui and not Managers.ui:view_active(BUFF_TOGGLE_VIEW) then
+		Managers.ui:open_view(BUFF_TOGGLE_VIEW)
+	end
 end)
 
 -- ---------------------------------------------------------------------------
@@ -578,9 +783,35 @@ local function _update_run()
 	end
 end
 
+-- Retries any spawn held above. The hook itself only runs when the game calls
+-- it, and it will not call again on its own -- so without this the held player
+-- would simply never get a pool.
+local function _update_pending_pool_init(dt)
+	if not next(pending_pool_init) then
+		return
+	end
+
+	for id, entry in pairs(pending_pool_init) do
+		entry.elapsed = entry.elapsed + dt
+
+		local manager = entry.manager
+
+		if mod.manager ~= manager then
+			-- The mission ended underneath us; drop it rather than calling into
+			-- a torn-down manager.
+			pending_pool_init[id] = nil
+		else
+			-- Re-entering the hook is the point: it re-tests the abilities and
+			-- clears the entry itself once they resolve or the timeout expires.
+			pcall(manager._manage_player_spawn, manager, entry.player, entry.is_respawn)
+		end
+	end
+end
+
 mod.update = function (dt)
 	_update_pending_launch(dt)
 	_update_run()
+	_update_pending_pool_init(dt)
 	triggers.update(dt)
 	pause.update()
 end
@@ -660,6 +891,70 @@ mod:command("cw_buff", mod:localize("command_cw_buff"), function (kind)
 
 	if not granted then
 		mod:echo(mod:localize("command_failed"))
+	end
+end)
+
+-- Grant one named buff, bypassing the pools. `/cw_give` with no name, or with
+-- a name that does not exist, searches instead of failing -- the buff names are
+-- long and easy to mistype, and a bare "unknown buff" would send you to the
+-- source to find the spelling.
+local MAX_SUGGESTIONS = 12
+
+mod:command("cw_give", mod:localize("command_cw_give"), function (buff_name)
+	local function suggest(needle, header)
+		local matches = triggers.find_buff_names(needle)
+
+		if #matches == 0 then
+			mod:echo(string.format("no buff name contains '%s'", _escape(needle)))
+
+			return
+		end
+
+		mod:echo(string.format("%s (%d):", header, #matches))
+
+		for i = 1, math.min(#matches, MAX_SUGGESTIONS) do
+			mod:echo("  " .. matches[i])
+		end
+
+		if #matches > MAX_SUGGESTIONS then
+			mod:echo(string.format("  ... and %d more - narrow the search", #matches - MAX_SUGGESTIONS))
+		end
+	end
+
+	if not buff_name or buff_name == "" then
+		mod:echo("custom buffs:")
+
+		for _, name in ipairs(custom_buffs.buff_names()) do
+			mod:echo("  " .. name)
+		end
+
+		mod:echo("usage: /cw_give <buff_name> - pass part of a name to search")
+
+		return
+	end
+
+	-- Any template can be granted, including one another mod added, so the
+	-- network id has to be guaranteed here rather than assumed from boot.
+	custom_buffs.ensure_network_id(buff_name)
+
+	local ok, reason = triggers.grant_named(buff_name)
+
+	-- Escaped: both the name and the failure reason reach here from outside,
+	-- and mod:echo re-formats its message -- a literal % in either would crash
+	-- the echo instead of reporting the problem.
+	if ok then
+		mod:echo(string.format("granted '%s'", _escape(buff_name)))
+	else
+		mod:echo(string.format("could not grant '%s': %s", _escape(buff_name), _escape(reason or "unknown reason")))
+		suggest(buff_name, "closest matches")
+	end
+end)
+
+-- Deliberately not gated on mod.manager: the most useful time to run this is
+-- when you suspect the buff system did not come up at all.
+mod:command("cw_verify", mod:localize("command_cw_verify"), function ()
+	for _, line in ipairs(custom_buffs.report()) do
+		mod:echo(line)
 	end
 end)
 

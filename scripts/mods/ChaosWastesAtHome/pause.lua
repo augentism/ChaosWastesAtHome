@@ -64,6 +64,10 @@ local function _is_server()
 	return ok and is_server
 end
 
+pause.is_paused = function ()
+	return state.paused
+end
+
 pause.resume = function ()
 	if not state.paused then
 		return
