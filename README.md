@@ -94,14 +94,14 @@ Everything is in the mod options menu.
 | Havoc theme circumstance chance | 50% | Hunting grounds / ventilation purge / toxic gas |
 | Buffs per mission | 3 legendary, 7 family | Per mission, not per run — deep runs stack up fast |
 | Pause while choosing | on | Freezes the game **and holds the card countdown**, so nothing is auto-picked. Off = stock 30s timer |
-| Debug logging | off | Turn on before reproducing a problem |
+| Debug logging | off | Turn on before reproducing a problem. Also enables a periodic custom-buff snapshot in the log |
 
 There are also unbound keybinds under **Testing** to end a mission instantly as a
 win or a loss, for exercising the chain without playing a whole map.
 
 ## Custom buffs
 
-`scripts/mods/ChaosWastesAtHome/custom_buffs.lua` adds five buffs of its own, in
+`scripts/mods/ChaosWastesAtHome/custom_buffs.lua` adds nine buffs of its own, in
 their own **Custom** category so you can weight or disable them as a group:
 
 - **Wrath Unbound** — a flat damage increase (a plain stat buff)
@@ -109,12 +109,22 @@ their own **Custom** category so you can weight or disable them as a group:
 - **Building Fury** — crit chance ramps on every non-crit, resets when you crit
 - **Relentless** — attack speed ramps per hit, resets after 2 seconds idle
 - **Contagion** — applying a status effect applies a second one at random
+- **Flayer** — every hit has a flat chance to burst the target's skull
+- **Proliferation** — an afflicted enemy's death spreads its status effects to
+  everything nearby
+- **Chain Lightning** — hits have a chance to arc through nearby enemies,
+  damaging and electrocuting each. An enemy the lightning just passed through
+  briefly cannot start another arc, so chains spread outward instead of
+  ping-ponging between the same two targets
+- **Multishot** — ranged weapons fire five shots in a fan for one round.
+  Shotguns are left alone; they already do this
 
 The file is commented as a worked example of each shape. To add your own, see
 **[docs/adding-custom-buffs.md](docs/adding-custom-buffs.md)** — the five
 registrations a buff needs, the buff shapes, and an index of every failure mode
-encountered building these five, including the two that crash only when a buff is
-*applied* rather than offered.
+encountered building these, including the two that crash only when a buff is
+*applied* rather than offered and the one that quietly grinds the frame rate to
+nothing.
 
 ## Known issues
 
@@ -139,6 +149,12 @@ Take the newest file. The log records every buff granted, every mission
 transition, and both guard counters, which is usually enough to identify the
 cause without a repro.
 
+With debug logging on, the mod also writes a **custom-buff snapshot** every ten
+seconds — which buffs you are holding, your live ramp stacks, and how many times
+each one has fired. It only writes when something has changed, so it does not
+bury the rest of the log. You do not need to run anything to produce it; if a
+buff is misbehaving, the sequence of snapshots usually shows it directly.
+
 ## Commands
 
 | Command | What it does |
@@ -149,7 +165,7 @@ cause without a repro.
 | `/cw_status` | Buffs granted this mission, plus any guard activity |
 | `/cw_buff [family\|legendary]` | Grant one now |
 | `/cw_give [name or search]` | Grant a specific buff; with no exact match it searches |
-| `/cw_verify` | Check the custom buffs are attached and having an effect |
+| `/cw_verify` | Print the custom-buff snapshot now (it is also logged passively — see below) |
 | `/cw_win` / `/cw_lose` | End the current mission (testing) |
 
 ## Credits

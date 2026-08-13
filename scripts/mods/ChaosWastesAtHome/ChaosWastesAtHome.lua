@@ -1034,6 +1034,7 @@ mod.update = function (dt)
 	_release_orphaned_pause_hold()
 	triggers.update(dt)
 	pause.update()
+	custom_buffs.update(dt)
 end
 
 -- ---------------------------------------------------------------------------

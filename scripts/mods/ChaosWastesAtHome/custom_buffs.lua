@@ -2,6 +2,15 @@ local mod = get_mod("ChaosWastesAtHome")
 
 local BuffSettings = require("scripts/settings/buff/buff_settings")
 local BuffTemplates = require("scripts/settings/buff/buff_templates")
+-- Deliberately required AFTER BuffTemplates. Loading BuffTemplates pulls in
+-- hordes_legendary_psyker_buff_templates (buff_templates.lua:46), which requires
+-- hordes_buffs_utilities and attack_settings -- so by the time we ask for them
+-- they are already in package.loaded and these lines are cache hits rather than
+-- fresh module executions during boot-time mod loading. Reordering them above
+-- the BuffTemplates line would make them the first loader, which is the risky
+-- position (see install_hooks for what a throwing require costs).
+local AttackSettings = require("scripts/settings/damage/attack_settings")
+local HordesBuffsUtilities = require("scripts/settings/buff/hordes_buffs/hordes_buffs_utilities")
 -- NOT required here: see install_hooks. minion_buff_extension pulls in
 -- buff_extension_base, which reads the `Network` global at file scope, and that
 -- global does not exist yet while mods are loading at boot.
@@ -11,6 +20,7 @@ local MissionBuffsAllowedBuffs = require("scripts/managers/mission_buffs/mission
 local MissionBuffsSettings = require("scripts/managers/mission_buffs/mission_buffs_settings")
 local Toughness = require("scripts/utilities/toughness/toughness")
 
+local attack_types = AttackSettings.attack_types
 local buff_categories = BuffSettings.buff_categories
 local proc_events = BuffSettings.proc_events
 local stat_buffs = BuffSettings.stat_buffs
@@ -25,8 +35,9 @@ local stat_buffs = BuffSettings.stat_buffs
 --
 -- To add a buff: add ONE entry to CATALOGUE below. Everything a buff needs --
 -- the template, its `name`, its network id, its card data, its loc strings and
--- its pool membership -- is derived from that entry by `register`. The five
--- worked examples cover the shapes worth copying.
+-- its pool membership -- is derived from that entry by `register`. The worked
+-- examples below cover the shapes worth copying, roughly in order of how much
+-- machinery they need.
 --
 -- The catalogue shape is lifted from Pilgrimage's bot-passive system, which had
 -- the same problem and solved it well: declaring a buff in five places six
@@ -48,6 +59,21 @@ local proc_counts = mod._custom_buff_procs or {}
 
 mod._custom_buff_procs = proc_counts
 
+-- Two buffs carry enough machinery to deserve their own file. Their catalogue
+-- entries still live here, so registration stays in one place and there is still
+-- exactly one list of what this mod adds.
+--
+-- Loaded from here and NOWHERE else. mod:io_dofile re-executes the file on every
+-- call rather than caching it, so a second loader anywhere in the mod would get
+-- its own copy of these modules -- a second set of counters, and in multishot's
+-- case a second registration of hooks that DMF would log as a rehook and drop.
+--
+-- Loaded after the requires above on purpose: both modules require engine
+-- modules that are only safely in package.loaded because requiring BuffTemplates
+-- pulled them in.
+local arc_chain = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/arc_chain")
+local multishot = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/multishot")
+
 -- Its own category rather than reusing "regular".
 --
 -- filtering_categories is an enum whose metatable errors on unknown reads, so
@@ -57,6 +83,12 @@ mod._custom_buff_procs = proc_counts
 local CATEGORY = "custom"
 
 MissionBuffsSettings.filtering_categories[CATEGORY] = CATEGORY
+
+-- Scratch buffer for broadphase queries, reused rather than allocated per call.
+-- The engine's own buff templates each keep one of these at file scope for the
+-- same reason; a proc that runs on every kill in a horde should not be handing
+-- the collector a fresh table each time.
+local BROADPHASE_RESULTS = {}
 
 -- Icons are reused from the shipped horde set. They are only loaded because the
 -- mod pulls in the Mortis package -- a genuinely custom texture would need a
@@ -233,7 +265,16 @@ _add({
 			-- Straight from the shipped version. Crit chance is clamped to 1
 			-- anyway (utilities/attack/critical_strike.lua:33) so stacks past
 			-- this point would be silently wasted rather than wrong.
+			--
+			-- BOTH fields, and max_stacks is not the one that caps.
+			-- `max_stacks` only makes a buff stackable at all --
+			-- `can_stack = not not template.max_stacks` (buff_extension_base.lua:436).
+			-- The limit is enforced by _check_max_stacks_cap, which returns
+			-- "allowed" outright when max_stacks_cap is nil (line 565). Setting
+			-- only max_stacks therefore gives an UNBOUNDED ramp that reports
+			-- itself as "158/20 stacks".
 			max_stacks = math.ceil(1 / CRIT_RAMP_STEP),
+			max_stacks_cap = math.ceil(1 / CRIT_RAMP_STEP),
 		}
 	end,
 })
@@ -325,7 +366,12 @@ _add({
 			conditional_exit_func = function (template_data, template_context, dt, t)
 				return ATTACK_SPEED_IDLE_RESET < t - template_data.last_action_t
 			end,
+			-- See the crit ramp above: max_stacks_cap is the one that actually
+			-- caps. Missing here it mattered more than there -- crit chance is
+			-- clamped downstream so an unbounded crit ramp is merely wasteful,
+			-- but nothing clamps attack speed.
 			max_stacks = math.ceil(ATTACK_SPEED_CAP / ATTACK_SPEED_STEP),
+			max_stacks_cap = math.ceil(ATTACK_SPEED_CAP / ATTACK_SPEED_STEP),
 		}
 	end,
 })
@@ -650,6 +696,336 @@ custom_buffs.install_hooks = function ()
 end
 
 -- ---------------------------------------------------------------------------
+-- Example 6: borrowing a shipped effect wholesale
+-- ---------------------------------------------------------------------------
+--
+-- A flat chance on any hit to Brain Burst the target. Notable for how little
+-- there is to it: HordesBuffsUtilities.trigger_brain_burst_on_target
+-- (hordes_buffs_utilities.lua:289) already resolves the target's head hit zone
+-- and actor, runs Attack.execute with the smite profile and plays the impact
+-- effect. Worth grepping the hordes directory before writing an effect --
+-- several of them are exported like this.
+--
+-- Also the example of letting proc_events do the dice. The number in
+-- proc_events is a chance, rolled by ProcBuff before check_proc_func is reached
+-- (proc_buff.lua:330), so a percentage buff needs no math.random of its own.
+
+local FLAYER_CHANCE = 0.1
+local FLAYER_BUFF = "cwah_flayer"
+
+-- Shared by the two ways this buff can fire, so they cannot drift apart.
+local function _flayer_burst(player_unit, target_unit)
+	if not target_unit or not HEALTH_ALIVE[target_unit] then
+		return
+	end
+
+	HordesBuffsUtilities.trigger_brain_burst_on_target(target_unit, player_unit)
+
+	proc_counts.cwah_flayer = (proc_counts.cwah_flayer or 0) + 1
+end
+
+_add({
+	id = "cwah_flayer",
+	pool = true,
+	title = "Flayer",
+	description = "Every hit has a " .. math.floor(FLAYER_CHANCE * 100)
+		.. "%% chance to burst the target's skull.",
+	icon = "hordes_buff_explode_enemies_on_critical_kill",
+	template = function ()
+		return {
+			class_name = "server_only_proc_buff",
+			max_stacks = 1,
+			max_stacks_cap = 1,
+			predicted = false,
+			buff_category = buff_categories.hordes_buff,
+			proc_events = {
+				[proc_events.on_hit] = FLAYER_CHANCE,
+			},
+			-- The one remaining guard, and it became MORE important when this
+			-- stopped being crit-gated rather than less. It is load-bearing
+			-- twice over:
+			--
+			-- 1. Brain burst's own Attack.execute uses attack_types.buff, so
+			--    without this a burst would roll to cause another burst on the
+			--    same target, forever. The crit requirement used to make that
+			--    rare; a flat chance on every hit would make it routine. The
+			--    shipped hordes_buff_psyker_brain_burst_hits_nearby_enemies
+			--    carries the same clause for the same reason.
+			-- 2. It also rejects damage-over-time ticks -- burning, bleed, and
+			--    the arc chain's own electrocution, which ticks every 0.3-0.8s
+			--    per shocked enemy through the same attack type. Those are not
+			--    hits in any sense the player would recognise, and without this
+			--    a fight full of burning enemies would burst skulls on its own.
+			--
+			-- Arc damage is rejected here too, and NOT because it should not
+			-- burst -- it should. It is handled on arc_chain's direct callback
+			-- below instead, because the on_hit announcement it would otherwise
+			-- arrive on is the first thing to go missing in a busy fight. Both
+			-- paths firing would mean two rolls per arc.
+			check_proc_func = function (params, template_data, template_context, t)
+				return params.attack_type ~= attack_types.buff
+					and params.damage_profile ~= arc_chain.DAMAGE_PROFILE
+			end,
+			proc_func = function (params, template_data, template_context)
+				_flayer_burst(template_context.unit, params.attacked_unit)
+			end,
+		}
+	end,
+})
+
+-- ---------------------------------------------------------------------------
+-- Example 7: reading state off another unit
+-- ---------------------------------------------------------------------------
+--
+-- A dying enemy's status effects spread to its neighbours. Structurally this is
+-- the shipped hordes_buff_psyker_brain_burst_spreads_fire_on_hit
+-- (hordes_legendary_psyker_buff_templates.lua:272) generalised from fire to
+-- every status effect, which costs nothing because the Contagion buff above
+-- already resolved BuffTemplates into `status_template_set`.
+--
+-- Two things here are worth copying rather than the buff itself: caching the
+-- broadphase and the enemy side names in start_func (querying the extension
+-- manager per proc is wasteful), and taking the origin position from
+-- params.attacked_unit_position rather than POSITION_LOOKUP -- the unit is
+-- dying, and the boxed position in the proc params is the reliable read.
+
+local PROLIFERATION_RANGE = 5
+local PROLIFERATION_MAX_TARGETS = 5
+
+-- Stacks are copied, not multiplied -- but capped, because
+-- add_internally_controlled_buff_with_stacks LOOPS, applying the buff once per
+-- stack (buff_extension_base.lua:408). A ten-stack soulblaze spread to five
+-- enemies is fifty applications, each of which also runs the Contagion hook.
+-- Five is enough for the effect to read as "it spread" without that multiplying
+-- out.
+local PROLIFERATION_MAX_STACKS = 5
+
+-- The seatbelt. Not a tuning knob: a proliferated enemy that dies of the
+-- proliferated soulblaze credits the kill to the player, so on_kill fires again
+-- and the spread can sustain itself through a horde. The recipient set below is
+-- the real fix; this is what stops a hole in it from becoming a frozen game
+-- rather than a buff that briefly feels weak. Do not raise it to make the buff
+-- feel better.
+local PROLIFERATIONS_PER_SECOND = 8
+
+-- Units we have already spread ONTO. A death from this set does not spread
+-- again, which is what breaks the self-sustaining chain.
+--
+-- Weak keys so despawned enemies drop out on their own -- otherwise this grows
+-- by one entry per affected enemy for the whole mission and nothing ever clears
+-- it. Parked on `mod` for the same reason as proc_counts: a live buff keeps the
+-- closure it was created with, so a reload must not hand the old closure a
+-- different table from the one the new one reads.
+local proliferated = mod._cwah_proliferated
+
+if not proliferated then
+	proliferated = setmetatable({}, { __mode = "k" })
+	mod._cwah_proliferated = proliferated
+end
+
+-- Scratch arrays for what the corpse was carrying, kept parallel and reused.
+-- This proc runs on every kill, which in a horde is often enough that handing
+-- the collector two fresh tables plus one per status effect each time is worth
+-- avoiding.
+local CARRIED_NAMES = {}
+local CARRIED_STACKS = {}
+
+_add({
+	id = "cwah_proliferation",
+	pool = true,
+	title = "Proliferation",
+	description = "When an enemy you have afflicted dies, every status effect on it spreads to nearby enemies.",
+	icon = "hordes_buff_burning_damage_per_burning_enemy",
+	template = function ()
+		return {
+			class_name = "server_only_proc_buff",
+			max_stacks = 1,
+			max_stacks_cap = 1,
+			predicted = false,
+			buff_category = buff_categories.hordes_buff,
+			proc_events = {
+				[proc_events.on_kill] = 1,
+			},
+			start_func = function (template_data, template_context)
+				local extension_manager = Managers.state and Managers.state.extension
+
+				if not extension_manager then
+					return
+				end
+
+				local broadphase_system = extension_manager:system("broadphase_system")
+
+				template_data.broadphase = broadphase_system and broadphase_system.broadphase
+
+				local side_system = extension_manager:system("side_system")
+				local side = side_system and side_system.side_by_unit[template_context.unit]
+
+				template_data.enemy_side_names = side and side:relation_side_names("enemy")
+
+				template_data.window_start = 0
+				template_data.window_count = 0
+			end,
+			proc_func = function (params, template_data, template_context, t)
+				local broadphase = template_data.broadphase
+				local enemy_side_names = template_data.enemy_side_names
+				local victim = params.attacked_unit
+
+				if not broadphase or not enemy_side_names or not victim then
+					return
+				end
+
+				-- Do not spread from something we spread onto.
+				if proliferated[victim] then
+					return
+				end
+
+				if t - template_data.window_start >= 1 then
+					template_data.window_start = t
+					template_data.window_count = 0
+				end
+
+				if template_data.window_count >= PROLIFERATIONS_PER_SECOND then
+					return
+				end
+
+				local victim_extension = ScriptUnit.has_extension(victim, "buff_system")
+
+				if not victim_extension or not status_template_set then
+					return
+				end
+
+				-- What the corpse was carrying. current_stacks is a single hash
+				-- lookup per name, so walking the whole status set is cheaper
+				-- than it looks and avoids depending on the private buff list.
+				local carried_count = 0
+
+				for template_name in pairs(status_template_set) do
+					local stacks = victim_extension:current_stacks(template_name)
+
+					if stacks > 0 then
+						carried_count = carried_count + 1
+						CARRIED_NAMES[carried_count] = template_name
+						CARRIED_STACKS[carried_count] = math.min(stacks, PROLIFERATION_MAX_STACKS)
+					end
+				end
+
+				proc_counts.cwah_proliferation_deaths = (proc_counts.cwah_proliferation_deaths or 0) + 1
+
+				if carried_count == 0 then
+					return
+				end
+
+				local position = params.attacked_unit_position and params.attacked_unit_position:unbox()
+
+				if not position then
+					return
+				end
+
+				local player_unit = template_context.unit
+
+				table.clear(BROADPHASE_RESULTS)
+
+				local num_hits = broadphase.query(broadphase, position, PROLIFERATION_RANGE,
+					BROADPHASE_RESULTS, enemy_side_names)
+				local spread_to = 0
+
+				for i = 1, num_hits do
+					local target = BROADPHASE_RESULTS[i]
+
+					if target ~= victim and HEALTH_ALIVE[target] then
+						local target_extension = ScriptUnit.has_extension(target, "buff_system")
+
+						if target_extension then
+							for j = 1, carried_count do
+								pcall(target_extension.add_internally_controlled_buff_with_stacks,
+									target_extension, CARRIED_NAMES[j], CARRIED_STACKS[j], t,
+									"owner_unit", player_unit)
+							end
+
+							proliferated[target] = true
+							spread_to = spread_to + 1
+
+							if spread_to >= PROLIFERATION_MAX_TARGETS then
+								break
+							end
+						end
+					end
+				end
+
+				if spread_to > 0 then
+					template_data.window_count = template_data.window_count + 1
+
+					proc_counts.cwah_proliferation = (proc_counts.cwah_proliferation or 0) + 1
+
+					mod:debug_log("proliferation: %d status effect(s) spread to %d enemies",
+						carried_count, spread_to)
+				end
+			end,
+		}
+	end,
+})
+
+-- ---------------------------------------------------------------------------
+-- Examples 8 and 9: behaviour that lives in its own file
+-- ---------------------------------------------------------------------------
+--
+-- Both of these carry enough logic that inlining them here would bury the
+-- catalogue. The entries stay, so there is still one list of everything this mod
+-- adds and one registration path; only the bodies moved.
+
+_add({
+	id = arc_chain.BUFF_NAME,
+	pool = true,
+	title = "Chain Lightning",
+	description = arc_chain.DESCRIPTION,
+	icon = "hordes_buff_shock_closest_enemy_on_interval",
+	template = arc_chain.template,
+})
+
+-- The electrocution the arcs leave behind. No `pool`, so it is registered but
+-- never offered -- same shape as the ramp stat carriers above, and registered
+-- here for the same reason: a helper template still needs a name and a network
+-- id, and both of those crash on apply rather than on offer.
+_add({
+	id = arc_chain.SHOCK_BUFF_NAME,
+	template = arc_chain.shock_template,
+})
+
+-- Flayer, off arcs.
+--
+-- Deliberately wired here rather than inside arc_chain.lua: the arc buff has no
+-- business knowing what Flayer is, and Flayer's odds and effect stay in one
+-- place. arc_chain just publishes "an arc landed".
+--
+-- Assigned at file scope, so it is live whether or not either buff is held --
+-- which is why the first thing it does is check the player actually has Flayer.
+-- Cheap: at most MAX_JUMPS calls per chain, and chains are budgeted.
+arc_chain.on_arc_hit = function (player_unit, target_unit, t)
+	if math.random() >= FLAYER_CHANCE then
+		return
+	end
+
+	local buff_extension = ScriptUnit.has_extension(player_unit, "buff_system")
+
+	if not buff_extension or not buff_extension:has_buff_using_buff_template(FLAYER_BUFF) then
+		return
+	end
+
+	_flayer_burst(player_unit, target_unit)
+
+	proc_counts.cwah_flayer_from_arc = (proc_counts.cwah_flayer_from_arc or 0) + 1
+end
+
+_add({
+	id = multishot.BUFF_NAME,
+	pool = true,
+	title = "Multishot",
+	description = multishot.DESCRIPTION,
+	icon = "hordes_buff_ranged_attacks_hit_mass_penetration_increased",
+	template = multishot.template,
+})
+
+-- ---------------------------------------------------------------------------
 -- Registration
 -- ---------------------------------------------------------------------------
 
@@ -903,15 +1279,114 @@ custom_buffs.apply_weight = function ()
 	mod:debug_log("custom buff category weight set to", weight)
 end
 
--- Answers "is this buff actually doing anything", which the HUD cannot.
+-- ---------------------------------------------------------------------------
+-- Reporting
+-- ---------------------------------------------------------------------------
 --
--- Attachment and effect are separate questions, so both get reported: a buff
--- can be listed on the player and still do nothing if its stat key is wrong or
--- its check_proc_func never passes.
+-- Answers "is this buff actually doing anything", which the HUD cannot.
+-- Attachment and effect are separate questions and both get reported: a buff can
+-- be listed on the player and still do nothing if its stat key is wrong or its
+-- check_proc_func never passes.
+--
+-- Written to the log passively behind the debug_logging setting, rather than
+-- only when someone runs /cw_verify. Two reasons, and the second is the real
+-- one:
+--
+-- 1. A line per buff stopped scaling once there were nine of them.
+-- 2. The interesting failures are shapes over time, not single samples. A proc
+--    count that climbs while the player stands still, or a guard that stops
+--    rejecting once a fight gets dense, is obvious in a series of snapshots and
+--    invisible in one -- and the one snapshot you get on demand is never taken
+--    at the moment things went wrong. A player reporting a problem sends the log
+--    anyway, so this costs them nothing to produce.
+
+-- The readings that cannot be counters because they are live state rather than a
+-- tally. Both ramps report stacks rather than the stat they produce: crit chance
+-- is clamped to 1 downstream and would stop moving long before the stacks do.
+local STACK_READINGS = {
+	{ buff = "cwah_crit_ramp_stack", label = "crit ramp", step = CRIT_RAMP_STEP, of = "crit" },
+	{ buff = "cwah_attack_speed_ramp_stack", label = "attack speed ramp", step = ATTACK_SPEED_STEP, of = "attack speed" },
+}
+
+-- Counters are reported generically -- whatever the proc funcs happen to have
+-- bumped, sorted, zeroes omitted. Deliberately NOT a hand-maintained table of
+-- pretty labels: that is exactly the thing that goes stale the next time a buff
+-- is added, and the raw keys are already readable. What a counter means belongs
+-- in a comment next to the code that bumps it.
+local function _report_lines()
+	local player = Managers.player and Managers.player:local_player_safe(1)
+	local player_unit = player and player.player_unit
+
+	if not player_unit or not Unit.alive(player_unit) then
+		return { "no local player unit - are you in a mission?" }
+	end
+
+	local buff_extension = ScriptUnit.has_extension(player_unit, "buff_system")
+
+	if not buff_extension then
+		return { "no buff extension on the player unit" }
+	end
+
+	local lines = {}
+
+	-- Attached, on one line. Walks the live buff instances, so it reflects what
+	-- the buff system believes rather than what the mod asked for.
+	local held = {}
+
+	for _, buff_name in ipairs(_pool_names()) do
+		if buff_extension:has_buff_using_buff_template(buff_name) then
+			held[#held + 1] = buff_name
+		end
+	end
+
+	lines[#lines + 1] = "held: " .. (#held > 0 and table.concat(held, ", ") or "none")
+
+	-- The multiplier the damage pipeline will actually read. Base is 1, so 1.15
+	-- means the stat buff landed. Other sources stack into the same number, so
+	-- read it as "at least ours", not "only ours".
+	local player_stat_buffs = buff_extension:stat_buffs()
+	local damage_multiplier = player_stat_buffs and player_stat_buffs[stat_buffs.damage]
+
+	lines[#lines + 1] = string.format("damage stat_buff multiplier: %s (1.0 = no bonus)",
+		damage_multiplier and string.format("%.3f", damage_multiplier) or "unreadable")
+
+	for _, reading in ipairs(STACK_READINGS) do
+		local template = BuffTemplates[reading.buff]
+		local stacks = buff_extension:current_stacks(reading.buff)
+
+		lines[#lines + 1] = string.format("%s: %d/%d stacks (+%.0f%% %s)",
+			reading.label, stacks, template and template.max_stacks or 0,
+			stacks * reading.step * 100, reading.of)
+	end
+
+	local keys = {}
+
+	for key, value in pairs(proc_counts) do
+		if value and value ~= 0 then
+			keys[#keys + 1] = key
+		end
+	end
+
+	table.sort(keys)
+
+	if #keys == 0 then
+		lines[#lines + 1] = "no custom buff has fired yet"
+	else
+		for _, key in ipairs(keys) do
+			lines[#lines + 1] = string.format("  %s: %d", key, proc_counts[key])
+		end
+	end
+
+	return lines
+end
+
 -- Report lines are echoed to chat, and mod:echo runs its message through
--- string.format -- so any literal % we produce (crit percentages, here) has to
--- be doubled or the echo crashes instead of printing. Applied at every exit so
--- a later line cannot reintroduce the bug.
+-- string.format -- so any literal % we produce (the ramp percentages) has to be
+-- doubled or the echo crashes instead of printing.
+--
+-- Only the chat path needs this. mod:debug_log escapes whatever it is handed on
+-- its way out, so the passive path below must pass the lines RAW -- escaping
+-- them twice would print a literal %%.
 local function _echo_safe(lines)
 	for i = 1, #lines do
 		lines[i] = (lines[i]:gsub("%%", "%%%%"))
@@ -921,64 +1396,52 @@ local function _echo_safe(lines)
 end
 
 custom_buffs.report = function ()
-	local lines = {}
-	local player = Managers.player and Managers.player:local_player_safe(1)
-	local player_unit = player and player.player_unit
+	return _echo_safe(_report_lines())
+end
 
-	if not player_unit or not Unit.alive(player_unit) then
-		return _echo_safe({ "no local player unit - are you in a mission?" })
+local REPORT_INTERVAL = 10
+local report_accum = 0
+local last_snapshot = nil
+
+-- Called every frame; does almost nothing on almost all of them.
+--
+-- Only logs when the snapshot has actually changed, so a quiet stretch does not
+-- fill the log with the same block over and over -- which matters because the
+-- log is the artefact a player sends back, and a wall of identical lines makes
+-- the moment something changed harder to find rather than easier.
+custom_buffs.update = function (dt)
+	if not mod.manager then
+		return
 	end
 
-	local buff_extension = ScriptUnit.has_extension(player_unit, "buff_system")
+	report_accum = report_accum + dt
 
-	if not buff_extension then
-		return _echo_safe({ "no buff extension on the player unit" })
+	if report_accum < REPORT_INTERVAL then
+		return
 	end
 
-	-- Attached: walks the live buff instances, so it reflects what the buff
-	-- system believes, not what the mod asked for.
-	for _, buff_name in ipairs(_pool_names()) do
-		local active = buff_extension:has_buff_using_buff_template(buff_name)
+	report_accum = 0
 
-		lines[#lines + 1] = string.format("%s: %s", buff_name, active and "ACTIVE" or "not active")
+	-- Checked after the interval, not before: building a report walks the buff
+	-- extension, and with logging off there is nobody to read the result.
+	if not mod:get("debug_logging") then
+		return
 	end
 
-	-- Effect, buff 1: the multiplier the damage pipeline will actually read.
-	-- Base is 1, so 1.15 means the stat buff landed. Other sources stack into
-	-- the same number, so read it as "at least ours", not "only ours".
-	local player_stat_buffs = buff_extension:stat_buffs()
-	local damage_multiplier = player_stat_buffs and player_stat_buffs[stat_buffs.damage]
+	local lines = _report_lines()
+	local snapshot = table.concat(lines, "\n")
 
-	lines[#lines + 1] = string.format("damage stat_buff multiplier: %s (1.0 = no bonus)",
-		damage_multiplier and string.format("%.3f", damage_multiplier) or "unreadable")
+	if snapshot == last_snapshot then
+		return
+	end
 
-	-- Effect, buff 2: procs only count elite kills, so trash kills prove nothing.
-	lines[#lines + 1] = string.format("toughness-on-elite-kill procs: %d",
-		proc_counts.cwah_custom_toughness_on_elite_kill or 0)
+	last_snapshot = snapshot
 
-	-- Effect, buff 3: stacks are the mechanic, so report them rather than the
-	-- crit chance -- the chance is clamped to 1 downstream and would stop moving
-	-- long before the stacks do.
-	local ramp_stacks = buff_extension:current_stacks("cwah_crit_ramp_stack")
-	local ramp_max = BuffTemplates.cwah_crit_ramp_stack.max_stacks
+	mod:debug_log("--- custom buffs ---")
 
-	lines[#lines + 1] = string.format("crit ramp: %d/%d stacks (+%.0f%% crit), %d non-crit hits counted",
-		ramp_stacks, ramp_max, ramp_stacks * CRIT_RAMP_STEP * 100, proc_counts.cwah_crit_ramp or 0)
-
-	-- Effect, buff 4: same reading, and the hit count is the useful half -- if
-	-- stacks sit at 0 while hits climb, the reset is firing when it should not.
-	local speed_stacks = buff_extension:current_stacks("cwah_attack_speed_ramp_stack")
-	local speed_max = BuffTemplates.cwah_attack_speed_ramp_stack.max_stacks
-
-	lines[#lines + 1] = string.format("attack speed ramp: %d/%d stacks (+%.0f%% attack speed), %d hits counted",
-		speed_stacks, speed_max, speed_stacks * ATTACK_SPEED_STEP * 100, proc_counts.cwah_attack_speed_ramp or 0)
-
-	-- Effect, buff 5: a zero here with the buff ACTIVE means the hook never
-	-- fired, which points at the detection rather than at the buff.
-	lines[#lines + 1] = string.format("status cascades: %d applied / %d triggers seen (pool of %d)",
-		proc_counts.cwah_status_cascade or 0, proc_counts.cwah_status_trigger or 0, #STATUS_EFFECTS)
-
-	return _echo_safe(lines)
+	for i = 1, #lines do
+		mod:debug_log(lines[i])
+	end
 end
 
 custom_buffs.category = CATEGORY
@@ -987,6 +1450,16 @@ custom_buffs.category = CATEGORY
 -- accumulating across a whole run and looking healthy on stale numbers.
 custom_buffs.reset_counters = function ()
 	table.clear(proc_counts)
+
+	-- Weak keys mean this drains on its own as enemies despawn, but a mission
+	-- boundary is a natural point to drop the lot rather than wait for the
+	-- collector.
+	table.clear(proliferated)
+
+	-- So the first report of a new mission is always written, rather than being
+	-- suppressed for matching the last one of the previous mission.
+	last_snapshot = nil
+	report_accum = 0
 end
 
 custom_buffs.buff_names = function ()
