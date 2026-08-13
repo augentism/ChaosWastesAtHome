@@ -9,6 +9,12 @@ local mod = get_mod("ChaosWastesAtHome")
 local run = {}
 
 mod._run = mod._run or {
+	-- Set the moment the launcher commits, and the thing that makes a run
+	-- opt-in. `active` cannot serve this purpose: it is set as a consequence of
+	-- the buff system starting, so gating activation on it would be circular.
+	-- This is set BEFORE the mission loads and survives the level change with
+	-- the rest of the run state.
+	launched = false,
 	active = false,
 	missions_completed = 0,
 	family = nil,
@@ -29,6 +35,16 @@ end
 
 run.is_active = function ()
 	return state.active == true
+end
+
+-- Whether the player deliberately started a run. Checked by the activation gate,
+-- so a mission the player launched any other way is left alone.
+run.is_launched = function ()
+	return state.launched == true
+end
+
+run.mark_launched = function ()
+	state.launched = true
 end
 
 run.depth = function ()
@@ -62,6 +78,7 @@ run.reset = function (reason)
 		mod:info("run ended (%s) after %d mission(s)", tostring(reason), state.missions_completed)
 	end
 
+	state.launched = false
 	state.active = false
 	state.missions_completed = 0
 	state.family = nil

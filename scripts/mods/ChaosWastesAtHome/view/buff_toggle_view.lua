@@ -93,6 +93,11 @@ BuffToggleView.on_enter = function (self)
 		widgets_by_name.detail_toggle_button.content.hotspot.pressed_callback = callback(self, "cb_toggle_selected")
 	end
 
+	-- Only the other tab does anything; this screen's own tab is inert.
+	if widgets_by_name.tab_start then
+		widgets_by_name.tab_start.content.hotspot.pressed_callback = callback(self, "cb_tab_start")
+	end
+
 	-- The icons live in the Mortis package, which is only resident during one of
 	-- our missions -- so in the Mourningstar every icon would be a placeholder.
 	-- Requesting it here makes the menu usable from the hub, and it is the same
@@ -420,6 +425,11 @@ BuffToggleView._refresh_group_counts = function (self)
 			self:_refresh_group_row(widget, group)
 		end
 	end
+end
+
+BuffToggleView.cb_tab_start = function (self)
+	Managers.ui:close_view(VIEW_NAME)
+	Managers.ui:open_view("chaos_wastes_launch_view")
 end
 
 BuffToggleView.cb_on_back_pressed = function (self)

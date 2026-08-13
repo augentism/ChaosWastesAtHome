@@ -7,6 +7,18 @@ local OPTION_HEIGHT = 132
 local OPTION_SPACING = 12
 local NUM_OPTIONS = 3
 
+-- The map preview sits BESIDE the text here, not above it as on the launcher
+-- cards. Three stacked cards with a banner each would make the panel taller
+-- than the screen; a thumbnail keeps the card height exactly as it was.
+local THUMB_W = 150
+local TEXT_X = THUMB_W + 14
+local TEXT_W = PANEL_WIDTH - TEXT_X - 16
+
+-- Lifted clear of the bottom of the screen so the end-of-round chat does not
+-- sit on top of the cards. The panel is centre-aligned, so this is an offset
+-- from the middle rather than an absolute position.
+local PANEL_Y = -150
+
 local scenegraph_definition = {
 	screen = UIWorkspaceSettings.screen,
 	panel = {
@@ -14,7 +26,7 @@ local scenegraph_definition = {
 		parent = "screen",
 		horizontal_alignment = "right",
 		size = { PANEL_WIDTH, NUM_OPTIONS * (OPTION_HEIGHT + OPTION_SPACING) + 90 },
-		position = { -70, 0, 200 },
+		position = { -70, PANEL_Y, 200 },
 	},
 	title = {
 		vertical_alignment = "top",
@@ -63,6 +75,24 @@ local function _option_widget(scenegraph_id)
 				style.color[3] = hotspot.is_selected and 30 or 8
 			end,
 		},
+		-- The artwork is a material value on the mission board's grid-effect
+		-- material, not the texture this pass draws. Handing it the map path as
+		-- `value` renders a blank square.
+		{
+			pass_type = "texture",
+			style_id = "preview",
+			value_id = "preview",
+			value = "content/ui/materials/mission_board/texture_with_grid_effect",
+			style = {
+				horizontal_alignment = "left",
+				vertical_alignment = "center",
+				size = { THUMB_W, OPTION_HEIGHT - 16 },
+				offset = { 8, 0, 3 },
+				material_values = {
+					texture_map = "content/ui/textures/missions/quickplay",
+				},
+			},
+		},
 		{
 			pass_type = "text",
 			value_id = "title",
@@ -71,8 +101,8 @@ local function _option_widget(scenegraph_id)
 				font_size = 22,
 				text_horizontal_alignment = "left",
 				text_vertical_alignment = "top",
-				offset = { 20, 14, 4 },
-				size = { PANEL_WIDTH - 40, 30 },
+				offset = { TEXT_X, 12, 4 },
+				size = { TEXT_W, 28 },
 				text_color = UIFontSettings.header_2.text_color,
 			},
 		},
@@ -84,8 +114,8 @@ local function _option_widget(scenegraph_id)
 				font_size = 16,
 				text_horizontal_alignment = "left",
 				text_vertical_alignment = "top",
-				offset = { 20, 46, 4 },
-				size = { PANEL_WIDTH - 40, 22 },
+				offset = { TEXT_X, 42, 4 },
+				size = { TEXT_W, 22 },
 				text_color = { 255, 190, 190, 190 },
 			},
 		},
@@ -98,8 +128,8 @@ local function _option_widget(scenegraph_id)
 				text_horizontal_alignment = "left",
 				text_vertical_alignment = "top",
 				word_wrap = true,
-				offset = { 20, 70, 4 },
-				size = { PANEL_WIDTH - 40, 56 },
+				offset = { TEXT_X, 66, 4 },
+				size = { TEXT_W, OPTION_HEIGHT - 74 },
 				text_color = { 255, 150, 140, 120 },
 			},
 		},

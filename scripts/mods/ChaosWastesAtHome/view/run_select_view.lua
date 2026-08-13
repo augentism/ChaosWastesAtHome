@@ -40,6 +40,8 @@ RunSelectView.on_enter = function (self)
 			widget.content.modifiers = option.modifiers_label or ""
 			widget.content.hotspot.pressed_callback = callback(self, "_cb_option_pressed", i)
 
+			self:_set_preview(widget, chain.mission_preview_texture(option.mission_name))
+
 			-- The first card is already the run's selection when this view
 			-- opens, so it has to look selected. An invisible default would be
 			-- worse than none: the run would continue somewhere the player had
@@ -58,6 +60,29 @@ RunSelectView.on_enter = function (self)
 		self._selected_index = 1
 		widgets_by_name.subtitle.content.text =
 			mod:localize("picker_selected", chain.mission_display_name(default_option.mission_name))
+	end
+end
+
+-- Both shapes handled rather than assuming which one the widget ended up with:
+-- the game writes content.<id>.material_values, while the values are declared in
+-- style. Guessing wrong is a nil index that only fires when a card is shown.
+RunSelectView._set_preview = function (self, widget, texture)
+	if not texture then
+		return
+	end
+
+	local content_preview = widget.content and widget.content.preview
+
+	if type(content_preview) == "table" and content_preview.material_values then
+		content_preview.material_values.texture_map = texture
+
+		return
+	end
+
+	local style_preview = widget.style and widget.style.preview
+
+	if style_preview and style_preview.material_values then
+		style_preview.material_values.texture_map = texture
 	end
 end
 

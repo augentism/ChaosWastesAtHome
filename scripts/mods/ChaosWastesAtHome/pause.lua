@@ -20,6 +20,10 @@ local TIMER = "gameplay"
 mod._pause_state = mod._pause_state or {
 	paused = false,
 	saved_scale = nil,
+	-- Held open by something other than a buff choice -- the collected-buffs
+	-- screen. Kept in the same state table so both reasons share one pause and
+	-- one restore, rather than two systems fighting over the timer scale.
+	hold = false,
 }
 
 local state = mod._pause_state
@@ -68,6 +72,17 @@ pause.is_paused = function ()
 	return state.paused
 end
 
+-- Requests a pause for as long as something is open. Applied by pause.update on
+-- the next tick like any other reason, so nothing here has to know about timer
+-- scales or about restoring them.
+pause.set_hold = function (on)
+	state.hold = on and true or false
+end
+
+pause.is_held = function ()
+	return state.hold == true
+end
+
 pause.resume = function ()
 	if not state.paused then
 		return
@@ -89,7 +104,11 @@ pause.resume = function ()
 end
 
 pause.update = function ()
-	local want_pause = mod:get("pause_on_choice") and mod.manager and _is_server() and _choice_is_up()
+	-- Two reasons, one pause. A buff choice honours the pause_on_choice option;
+	-- the hold does not, because the player opened that screen deliberately and
+	-- a menu that does not stop the world is a menu that gets you killed.
+	local choice_pause = mod:get("pause_on_choice") and _choice_is_up()
+	local want_pause = mod.manager and _is_server() and (choice_pause or state.hold)
 
 	if want_pause == state.paused then
 		return

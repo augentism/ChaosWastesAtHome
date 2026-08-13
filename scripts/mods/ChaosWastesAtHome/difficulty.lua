@@ -56,6 +56,37 @@ local function _danger_index(challenge, resistance)
 	return nil
 end
 
+-- The ladder as an ordered list, for the launcher's difficulty slider.
+--
+-- Derived from the same DangerSettings walk and the same HAVOC_* constants the
+-- ramp uses, so the slider cannot drift out of step with what difficulty.next
+-- does between missions. Entries are the plain {challenge, resistance} or
+-- {havoc_rank} shapes that chain.roll_options already consumes.
+--
+-- Starts at Malice: Sedition and Uprising are below the floor this mod is
+-- balanced around, and a run that opens there spends its first legs with
+-- nothing to fight.
+local FIRST_RUNG_CHALLENGE = 3
+
+difficulty.rungs = function ()
+	local rungs = {}
+
+	for _, danger in ipairs(DangerSettings) do
+		if danger.challenge >= FIRST_RUNG_CHALLENGE then
+			rungs[#rungs + 1] = {
+				challenge = danger.challenge,
+				resistance = danger.resistance,
+			}
+		end
+	end
+
+	for rank = HAVOC_ENTRY_RANK, HAVOC_MAX_RANK, HAVOC_STEP do
+		rungs[#rungs + 1] = { havoc_rank = rank }
+	end
+
+	return rungs
+end
+
 -- Reads what the mission currently being played is set to.
 difficulty.current = function ()
 	local manager = Managers.state and Managers.state.difficulty
@@ -292,8 +323,25 @@ difficulty.describe = function (params)
 	local index = _danger_index(params.challenge, params.resistance)
 	local danger = index and DangerSettings[index]
 
-	if danger and danger.name then
-		return danger.name
+	if danger then
+		-- display_name, not name. The `name` field is the internal id and is
+		-- lowercase ("malice"); display_name is a loc key resolving to "Malice"
+		-- -- already capitalised, and translated, which hand-capitalising the id
+		-- would not be.
+		local loc_key = danger.display_name
+
+		if loc_key then
+			local ok, localized = pcall(Localize, loc_key)
+
+			if ok and localized and localized ~= "" and not string.starts_with(localized, "<") then
+				return localized
+			end
+		end
+
+		-- Only if the lookup fails: capitalise the id rather than showing it raw.
+		if danger.name then
+			return danger.name:sub(1, 1):upper() .. danger.name:sub(2)
+		end
 	end
 
 	return string.format("challenge %s / resistance %s",

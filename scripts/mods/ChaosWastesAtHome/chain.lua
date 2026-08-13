@@ -1,6 +1,8 @@
 local mod = get_mod("ChaosWastesAtHome")
 
+local CircumstanceTemplates = require("scripts/settings/circumstance/circumstance_templates")
 local MissionTemplates = require("scripts/settings/mission/mission_templates")
+local MutatorTemplates = require("scripts/settings/mutator/mutator_templates")
 local Promise = require("scripts/foundation/utilities/promise")
 
 local run = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/run")
@@ -17,21 +19,39 @@ local chain = {}
 
 local NUM_OPTIONS = 3
 
+-- Missions excluded by id, on top of the type filter below.
+--
+-- Ids, not display names, because the names are localized. Confirmed against
+-- the localization export rather than guessed: the loc key is
+-- loc_mission_name_<id>, so "The Orthus Offensive" resolves to km_enforcer_twins
+-- -- the Karnak Twins map, typed `assassination`, which is exactly why the
+-- operations filter below never caught it.
+--
+-- All three are long, scripted, multi-stage maps built around a full team, and
+-- none of them belong in a rolled run. Pilgrimage independently denylists
+-- km_enforcer_twins and reserves the other two.
+local MISSION_DENYLIST = {
+	km_enforcer_twins = true, -- The Orthus Offensive
+	op_train = true, -- Rolling Steel
+	op_no_mans_land = true, -- No Man's Land
+}
+
 -- The pool the mod itself applies to: regular adventure missions running
 -- coop_complete_objective. Operations and the horde/psykhanium missions run
 -- other game modes, which this mod does not hook.
-local function _is_eligible(mission)
+local function _is_eligible(mission, name)
 	return mission.mechanism_name == "adventure"
 		and mission.game_mode_name == "coop_complete_objective"
 		and mission.mission_type ~= "operations"
 		and mission.level ~= nil
+		and not MISSION_DENYLIST[name]
 end
 
 chain.eligible_missions = function ()
 	local names = {}
 
 	for name, mission in pairs(MissionTemplates) do
-		if _is_eligible(mission) then
+		if type(mission) == "table" and _is_eligible(mission, name) then
 			names[#names + 1] = name
 		end
 	end
@@ -39,6 +59,91 @@ chain.eligible_missions = function ()
 	table.sort(names)
 
 	return names
+end
+
+-- ---------------------------------------------------------------------------
+-- Maelstrom
+-- ---------------------------------------------------------------------------
+
+-- Every non-Havoc mission gets one, rolled per option.
+--
+-- These are the mission board's Maelstrom modifiers: the game ships them as
+-- circumstance templates in two tiers, the standard set and a harder set used at
+-- Auric, and identifies them by a maelstrom icon rather than any category field.
+-- Prefix is the only reliable handle, hence the scan.
+local MAELSTROM_PREFIX = "flash_mission_"
+local MAELSTROM_AURIC_PREFIX = "high_flash_mission_"
+
+-- Auric is the top normal rung, so it takes the harder set.
+local AURIC_CHALLENGE = 5
+local AURIC_RESISTANCE = 5
+
+local maelstrom_pools = nil
+
+-- A circumstance naming a mutator the game no longer has is a crash when the
+-- mission loads, not a warning. Fatshark removes mutators between patches and
+-- the templates referencing them survive, so this is the same guard SoloPlay
+-- applies (SoloPlaySettings.lua:221) and the only client-side way to spot one.
+local function _mutators_exist(template)
+	local mutators = template.mutators
+
+	if not mutators then
+		return true
+	end
+
+	for i = 1, #mutators do
+		if not MutatorTemplates[mutators[i]] then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function _build_maelstrom_pools()
+	local standard, auric = {}, {}
+
+	for name, template in pairs(CircumstanceTemplates) do
+		if type(template) == "table" and _mutators_exist(template) then
+			-- starts_with, not a substring match: six_one_flash_mission_* is a
+			-- third, special-cased set that carries its own challenge scaling
+			-- and must not be rolled in here.
+			if string.starts_with(name, MAELSTROM_AURIC_PREFIX) then
+				auric[#auric + 1] = name
+			elseif string.starts_with(name, MAELSTROM_PREFIX) then
+				standard[#standard + 1] = name
+			end
+		end
+	end
+
+	table.sort(standard)
+	table.sort(auric)
+
+	mod:info("maelstrom pools: %d standard, %d auric", #standard, #auric)
+
+	return { standard = standard, auric = auric }
+end
+
+-- Rolled fresh per option so the three cards can offer different ones.
+local function _roll_maelstrom(challenge, resistance)
+	if not maelstrom_pools then
+		maelstrom_pools = _build_maelstrom_pools()
+	end
+
+	local is_auric = challenge >= AURIC_CHALLENGE and resistance >= AURIC_RESISTANCE
+	local pool = is_auric and maelstrom_pools.auric or maelstrom_pools.standard
+
+	-- Falls back to the standard set rather than to nothing, so an empty auric
+	-- pool costs the harder variant and not the modifier itself.
+	if #pool == 0 then
+		pool = maelstrom_pools.standard
+	end
+
+	if #pool == 0 then
+		return nil
+	end
+
+	return pool[math.random(#pool)]
 end
 
 -- Difficulty and circumstance of the mission being played, so the next one in
@@ -125,7 +230,13 @@ chain.describe_params = function (params)
 	return difficulty.describe(params)
 end
 
-chain.roll_options = function (params)
+-- skip_ramp is for the launcher.
+--
+-- In the chain this rolls the mission AFTER the one being played, so it ramps a
+-- rung first. From the hub the player has just picked the rung they want to
+-- start at, and ramping there would hand them something one step harder than
+-- the slider says.
+chain.roll_options = function (params, skip_ramp)
 	params = params or chain.current_params()
 
 	if not params then
@@ -150,7 +261,7 @@ chain.roll_options = function (params)
 	-- the ramp is visible on the picker rather than being a surprise on load.
 	local target = params
 
-	if mod:get("difficulty_ramp") then
+	if mod:get("difficulty_ramp") and not skip_ramp then
 		target = difficulty.next(params) or params
 	end
 
@@ -176,11 +287,18 @@ chain.roll_options = function (params)
 				modifiers_label = difficulty.describe_circumstances(circumstances),
 			}
 		else
+			-- A fresh maelstrom per option rather than carrying the played
+			-- mission's circumstance forward: the run is meant to keep throwing
+			-- new conditions at you, and the three cards differing is what makes
+			-- the choice interesting rather than cosmetic.
+			local maelstrom = _roll_maelstrom(target.challenge, target.resistance)
+
 			option = {
 				mission_name = mission_name,
 				challenge = target.challenge,
 				resistance = target.resistance,
-				circumstance_name = params.circumstance_name,
+				circumstance_name = maelstrom or params.circumstance_name or "default",
+				modifiers_label = maelstrom and difficulty.describe_circumstances({ maelstrom }) or nil,
 			}
 		end
 
@@ -191,6 +309,22 @@ chain.roll_options = function (params)
 	end
 
 	return options
+end
+
+-- The map preview the mission board draws, read straight off the template.
+--
+-- No shipped assets to duplicate: every mission template carries texture_small,
+-- texture_medium and texture_big, and the mission board picks between the first
+-- two by tile size (mission_board_view_blueprints.lua:1251). Medium is the right
+-- one for a card this size.
+chain.mission_preview_texture = function (mission_name)
+	local mission = MissionTemplates[mission_name]
+
+	if not mission then
+		return nil
+	end
+
+	return mission.texture_medium or mission.texture_small or mission.texture_big
 end
 
 chain.mission_display_name = function (mission_name)

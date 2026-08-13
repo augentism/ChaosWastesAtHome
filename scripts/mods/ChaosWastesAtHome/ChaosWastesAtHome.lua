@@ -27,9 +27,13 @@ local spawn_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtH
 local asset_loader = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/asset_loader")
 local custom_buffs = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/custom_buffs")
 local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_pool")
+local escape = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/escape")
+local solo = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/solo")
 
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
 local BUFF_TOGGLE_VIEW = "chaos_wastes_buff_toggle_view"
+local LAUNCH_VIEW = "chaos_wastes_launch_view"
+local BUFFS_VIEW = "chaos_wastes_buffs_view"
 
 -- Set for the lifetime of a mission we have taken over; everything else in the
 -- mod treats a non-nil `mod.manager` as "the Mortis buff system is live".
@@ -123,6 +127,7 @@ end
 
 particle_guard.install()
 spawn_guard.install()
+escape.install()
 custom_buffs.register()
 
 -- Singleplay only, and not negotiable. On a hosted session the buff system
@@ -131,6 +136,14 @@ custom_buffs.register()
 -- the mod would break other people's game, not just this one.
 local function _should_activate(game_mode, game_mode_name)
 	if game_mode_name == "hub" or game_mode_name == "prologue_hub" then
+		return false
+	end
+
+	-- Opt-in. Without this the mod takes over every mission that happens to be
+	-- singleplay, which for anyone running SoloPlay is all of their solo play --
+	-- the "boons in normal matches" reports. A run has to be started from our
+	-- own launcher, and the flag rides along through every hop of the chain.
+	if not run.is_launched() then
 		return false
 	end
 
@@ -440,6 +453,174 @@ mod:hook(ConstantElementMissionBuffs, "_is_player_in_mission", function (func, s
 end)
 
 -- ---------------------------------------------------------------------------
+-- Solo sessions
+-- ---------------------------------------------------------------------------
+
+mod.on_all_mods_loaded = function ()
+	solo.load_end_view_package()
+end
+
+-- Hooked by class NAME rather than by requiring the module, which is how
+-- Tertium4Or5 hooks this same class. DMF resolves the name when the class
+-- exists, so nothing is executed early during boot -- the failure mode that
+-- poisoned minion_buff_extension for the whole session.
+mod:hook("PlayerUnitSpawnManager", "_handle_initial_bot_spawning", function (func, self, ...)
+	if solo.should_suppress_bots() then
+		mod:debug_log("solo run - skipping initial bot spawning")
+
+		return
+	end
+
+	return func(self, ...)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Collected buffs screen
+-- ---------------------------------------------------------------------------
+
+mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buffs_view")
+mod:register_view({
+	view_name = BUFFS_VIEW,
+	view_settings = {
+		init_view_function = function (ingame_ui_context)
+			return true
+		end,
+		state_bound = true,
+		path = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buffs_view",
+		class = "ChaosWastesBuffsView",
+		disable_game_world = false,
+		load_always = true,
+		load_in_hub = false,
+		game_world_blur = 1.1,
+	},
+	view_transitions = {},
+	view_options = {
+		close_all = false,
+		close_previous = false,
+	},
+})
+
+-- The keybind that opens this lives further down, after the launcher's own
+-- helpers exist -- see mod.toggle_menu.
+
+-- ---------------------------------------------------------------------------
+-- Run launcher
+-- ---------------------------------------------------------------------------
+
+mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/launch_view")
+mod:register_view({
+	view_name = LAUNCH_VIEW,
+	view_settings = {
+		init_view_function = function (ingame_ui_context)
+			return true
+		end,
+		state_bound = true,
+		path = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/launch_view",
+		class = "ChaosWastesLaunchView",
+		disable_game_world = false,
+		load_always = true,
+		load_in_hub = true,
+		game_world_blur = 1.1,
+	},
+	view_transitions = {},
+	view_options = {
+		close_all = false,
+		close_previous = false,
+	},
+})
+
+-- Only from the hub.
+--
+-- chain.launch waits on _session_boot.leaving_game_session, and that flag is
+-- only ever set when a live Managers.state.game_session exists. From the hub or
+-- a mission it flips; from the main menu it never does and the promise waits
+-- forever. Mid-mission launching is the chain's job, not this screen's.
+local function _can_open_launcher()
+	local game_mode_manager = Managers.state and Managers.state.game_mode
+
+	if not game_mode_manager then
+		return false
+	end
+
+	local ok, game_mode_name = pcall(game_mode_manager.game_mode_name, game_mode_manager)
+
+	return ok and (game_mode_name == "hub" or game_mode_name == "prologue_hub")
+end
+
+local function _open_launcher()
+	if not Managers.ui or Managers.ui:view_active(LAUNCH_VIEW) then
+		return
+	end
+
+	if not _can_open_launcher() then
+		mod:echo(mod:localize("launch_hub_only"))
+
+		return
+	end
+
+	Managers.ui:open_view(LAUNCH_VIEW)
+end
+
+mod:command("cw_launch", mod:localize("command_cw_launch"), _open_launcher)
+
+-- ---------------------------------------------------------------------------
+-- The one keybind
+-- ---------------------------------------------------------------------------
+
+-- Which screen you get is decided by where you are, because in each place there
+-- is only one useful answer: in the Mourningstar you are setting a run up, in a
+-- mission you are looking at what you have. The two hub screens are tabs of each
+-- other, so neither needs a binding of its own.
+--
+-- Toggling rather than opening: the same key puts it away again, which is what
+-- anyone tries first and saves reaching for escape while the world is stopped.
+--
+-- Defined here rather than beside the buffs view because it calls
+-- _open_launcher, and a local referenced before its declaration compiles to a
+-- global read -- silently nil at runtime.
+local OUR_VIEWS = { LAUNCH_VIEW, BUFF_TOGGLE_VIEW, BUFFS_VIEW }
+
+local function _close_open_view()
+	local ui_manager = Managers.ui
+
+	if not ui_manager then
+		return false
+	end
+
+	for _, view_name in ipairs(OUR_VIEWS) do
+		if ui_manager:view_active(view_name) then
+			ui_manager:close_view(view_name)
+
+			return true
+		end
+	end
+
+	return false
+end
+
+mod.toggle_menu = function ()
+	if not Managers.ui then
+		return
+	end
+
+	-- Any of ours being open means the key is being used to dismiss it, whichever
+	-- one it is.
+	if _close_open_view() then
+		return
+	end
+
+	if mod.manager then
+		Managers.ui:open_view(BUFFS_VIEW)
+
+		return
+	end
+
+	_open_launcher()
+end
+
+mod:command("cw_menu", mod:localize("command_cw_menu"), mod.toggle_menu)
+
+-- ---------------------------------------------------------------------------
 -- Buff toggle menu
 -- ---------------------------------------------------------------------------
 
@@ -476,7 +657,7 @@ mod:register_view({
 -- re-enter this handler -- and the reset also makes the same entry pickable
 -- again, since the widget re-reads its displayed value from mod:get each frame.
 mod.on_setting_changed = function (setting_id)
-	if setting_id ~= "open_buff_toggle_view" then
+	if setting_id ~= "open_menu" then
 		return
 	end
 
@@ -484,11 +665,11 @@ mod.on_setting_changed = function (setting_id)
 		return
 	end
 
+	-- notify=false, or this re-enters. The reset also makes the same entry
+	-- pickable again, since the dropdown re-reads its value from mod:get.
 	mod:set(setting_id, "none", false)
 
-	if Managers.ui and not Managers.ui:view_active(BUFF_TOGGLE_VIEW) then
-		Managers.ui:open_view(BUFF_TOGGLE_VIEW)
-	end
+	mod.toggle_menu()
 end
 
 mod:command("cw_buffs", mod:localize("command_cw_buffs"), function ()
@@ -640,12 +821,31 @@ end
 -- still happens -- we are not trying to keep the session alive -- we just
 -- record the choice first, so the hub relaunch picks it up exactly as it does
 -- on the timer path.
-mod:hook_safe(MultiplayerSessionManager, "leave", function (self, reason)
-	if reason ~= "skip_end_of_round" then
-		return
+-- One hook doing two jobs, because it has to be one.
+--
+-- A second mod:hook* on the same method from the same mod is logged as a rehook
+-- and silently dropped, so the strike-team fix cannot be added alongside the
+-- end-of-round handling -- it has to live inside it. It is also a full hook
+-- rather than hook_safe: hook_safe runs after the original and cannot change
+-- the arguments, and rewriting the reason is the entire fix.
+mod:hook(MultiplayerSessionManager, "leave", function (func, self, reason)
+	-- Leaving a mission should not also leave the strike team. The escape menu
+	-- has a separate button for that, and the two reasons differ only in whether
+	-- mechanism_left_session calls _leave_party.
+	if escape.should_keep_party(reason) then
+		mod:info("leaving the mission but staying in the strike team")
+
+		reason = escape.KEEP_PARTY_REASON
 	end
 
-	_queue_next_mission("continue pressed")
+	local result = func(self, reason)
+
+	-- After the original, preserving the ordering the previous hook_safe had.
+	if reason == "skip_end_of_round" then
+		_queue_next_mission("continue pressed")
+	end
+
+	return result
 end)
 
 mod:hook_safe(MechanismAdventure, "game_score_done", function (self)
@@ -808,10 +1008,30 @@ local function _update_pending_pool_init(dt)
 	end
 end
 
+-- The hold is released in the view's on_exit, but on_exit is not guaranteed --
+-- a mod reload with the screen open, or a mission tearing down underneath it,
+-- both skip it. A stranded hold means the gameplay timer stays at zero for the
+-- rest of the session, so the state is reconciled against the view every frame
+-- rather than trusted.
+local function _release_orphaned_pause_hold()
+	if not pause.is_held() then
+		return
+	end
+
+	if Managers.ui and Managers.ui:view_active(BUFFS_VIEW) then
+		return
+	end
+
+	pause.set_hold(false)
+
+	mod:debug_log("released an orphaned pause hold")
+end
+
 mod.update = function (dt)
 	_update_pending_launch(dt)
 	_update_run()
 	_update_pending_pool_init(dt)
+	_release_orphaned_pause_hold()
 	triggers.update(dt)
 	pause.update()
 end

@@ -41,22 +41,38 @@ return {
 	is_togglable = true,
 	options = {
 		widgets = {
-			-- A dropdown, not a button: DMF has no button widget type. Picking
-			-- "open" opens the view and on_setting_changed resets this to
-			-- "none" so the same entry can be picked again next time.
+			-- One keybind for every screen. Which one opens depends on where you
+			-- are: the launcher in the Mourningstar, the collected buffs in a
+			-- mission, and the two hub screens are tabs of each other.
 			{
-				setting_id    = "open_buff_toggle_view",
+				setting_id      = "menu_keybind",
+				type            = "keybind",
+				default_value   = {},
+				keybind_trigger = "pressed",
+				keybind_type    = "function_call",
+				function_name   = "toggle_menu",
+			},
+			-- The same thing from the options menu, for anyone who has not bound
+			-- a key. A dropdown, not a button: DMF has no button widget type.
+			-- on_setting_changed resets it to "none" so it can be picked again.
+			{
+				setting_id    = "open_menu",
 				type          = "dropdown",
 				default_value = "none",
 				options = {
 					{ text = "buff_toggle_open_none", value = "none" },
-					{ text = "buff_toggle_open_now",  value = "open" },
+					{ text = "menu_open_now",         value = "open" },
 				},
 			},
 			{
 				setting_id    = "difficulty_ramp",
 				type          = "checkbox",
 				default_value = true,
+			},
+			{
+				setting_id    = "use_bots",
+				type          = "checkbox",
+				default_value = false,
 			},
 			{
 				setting_id    = "preload_horde_assets",

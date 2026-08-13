@@ -25,6 +25,24 @@ local ICON_SIZE = 96
 local scenegraph_definition = {
 	screen = UIWorkspaceSettings.screen,
 
+	-- The same pair the launcher carries, in the same place, so switching does
+	-- not move the controls under the cursor.
+	tab_start = {
+		vertical_alignment = "top",
+		parent = "screen",
+		horizontal_alignment = "center",
+		size = { 280, 40 },
+		position = { -145, 84, 3 },
+	},
+
+	tab_buffs = {
+		vertical_alignment = "top",
+		parent = "screen",
+		horizontal_alignment = "center",
+		size = { 280, 40 },
+		position = { 145, 84, 3 },
+	},
+
 	title_divider = {
 		vertical_alignment = "top",
 		parent = "screen",
@@ -364,6 +382,16 @@ local widget_definitions = {
 			style = { color = { 255, 255, 255, 255 } },
 		},
 	}, "buff_grid_mask"),
+
+	tab_start = UIWidget.create_definition(
+		table.clone(ButtonPassTemplates.default_button), "tab_start",
+		{ original_text = mod:localize("tab_start_run") }
+	),
+
+	tab_buffs = UIWidget.create_definition(
+		table.clone(ButtonPassTemplates.default_button), "tab_buffs",
+		{ original_text = mod:localize("tab_rollable_buffs") }
+	),
 
 	-- default_button reads its label from original_text, not text: a
 	-- change_function overwrites content.text every frame.
