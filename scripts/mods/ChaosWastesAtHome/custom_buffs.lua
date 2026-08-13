@@ -23,9 +23,14 @@ local stat_buffs = BuffSettings.stat_buffs
 -- mod can add to BuffTemplates, HordesBuffsData and the allowed-buff pools at
 -- load time and the buff system treats the result as native.
 --
--- To add a buff: write a template, add a HordesBuffsData entry, register its
--- two loc strings, and list it in POOL below. The two examples cover the shapes
--- worth copying -- a passive stat buff, and one that reacts to an event.
+-- To add a buff: add ONE entry to CATALOGUE below. Everything a buff needs --
+-- the template, its `name`, its network id, its card data, its loc strings and
+-- its pool membership -- is derived from that entry by `register`. The five
+-- worked examples cover the shapes worth copying.
+--
+-- The catalogue shape is lifted from Pilgrimage's bot-passive system, which had
+-- the same problem and solved it well: declaring a buff in five places six
+-- hundred lines apart is how you end up shipping one that crashes when picked.
 
 local custom_buffs = {}
 
@@ -58,31 +63,48 @@ MissionBuffsSettings.filtering_categories[CATEGORY] = CATEGORY
 -- mod bundle, which is a much larger job.
 local ICON_ROOT = "content/ui/textures/icons/buffs/hud/horde_buffs/small_buffs/"
 
+-- Every buff this mod defines, in one list.
+--
+-- Entry fields:
+--   id            required, and the BuffTemplates key
+--   pool          true = offered in legendary picks. false/absent = a helper
+--                 applied by another buff, which still needs a name and a
+--                 network id but no card data and no pool membership
+--   title         English name. The loc KEY is derived as loc_<id>_title, the
+--   description   same way the game derives them in hordes_buffs_data.lua, so
+--                 there is no second place for the two to disagree
+--   icon          short name, appended to ICON_ROOT. Pool entries only
+--   stat_buffs    shorthand for a plain passive buff
+--   template      factory returning the full template, for anything else. Given
+--                 a factory, `stat_buffs` is ignored -- put them in the table
+--
+-- Entries are appended by each example section below, so the file still reads
+-- as five worked examples rather than one wall of data.
+local CATALOGUE = {}
+
+local function _add(entry)
+	CATALOGUE[#CATALOGUE + 1] = entry
+
+	return entry
+end
+
 -- ---------------------------------------------------------------------------
 -- Example 1: a passive stat buff
 -- ---------------------------------------------------------------------------
 
-BuffTemplates.cwah_custom_damage = {
-	class_name = "buff",
-	max_stacks = 1,
-	max_stacks_cap = 1,
-	predicted = false,
-	buff_category = buff_categories.hordes_buff,
+-- The `stat_buffs` shorthand: register builds a plain passive template from it.
+-- `filter_category` is written for you, which matters -- omitting it is a
+-- nil-index crash at mission start, a long way from the buff that caused it.
+_add({
+	id = "cwah_custom_damage",
+	pool = true,
+	title = "Wrath Unbound",
+	description = "Increases all damage you deal by 15%%.",
+	icon = "hordes_buff_damage_increase",
 	stat_buffs = {
 		[stat_buffs.damage] = 1.15,
 	},
-}
-
-HordesBuffsData.cwah_custom_damage = {
-	title = "loc_cwah_custom_damage_title",
-	description = "loc_cwah_custom_damage_description",
-	icon = ICON_ROOT .. "hordes_buff_damage_increase",
-	is_family_buff = false,
-	-- Mandatory. init_legendary_buffs_pool_for_player indexes the pool table by
-	-- this and then table.inserts into the result, so omitting it is a nil-index
-	-- crash at mission start, a long way from the buff that caused it.
-	filter_category = CATEGORY,
-}
+})
 
 -- ---------------------------------------------------------------------------
 -- Example 2: a proc buff that reacts to an event
@@ -90,34 +112,39 @@ HordesBuffsData.cwah_custom_damage = {
 
 local TOUGHNESS_PER_ELITE_KILL = 15
 
-BuffTemplates.cwah_custom_toughness_on_elite_kill = {
-	-- server_only_proc_buff, not proc_buff: the effect changes authoritative
-	-- state (toughness), so it must not run predicted on the client as well.
-	class_name = "server_only_proc_buff",
-	max_stacks = 1,
-	max_stacks_cap = 1,
-	predicted = false,
-	buff_category = buff_categories.hordes_buff,
-	proc_events = {
-		[proc_events.on_kill] = 1,
-	},
-	check_proc_func = CheckProcFunctions.on_elite_kill,
-	proc_func = function (params, template_data, template_context)
-		Toughness.replenish_percentage(template_context.unit, TOUGHNESS_PER_ELITE_KILL / 100, false)
+-- Anything past a plain stat buff supplies a `template` factory instead.
+_add({
+	id = "cwah_custom_toughness_on_elite_kill",
+	pool = true,
+	title = "Bulwark",
+	description = "Killing an elite restores " .. TOUGHNESS_PER_ELITE_KILL .. "%% toughness.",
+	icon = "hordes_buff_toughness_on_melee_kills",
+	template = function ()
+		return {
+			-- server_only_proc_buff, not proc_buff: the effect changes
+			-- authoritative state (toughness), so it must not run predicted on
+			-- the client as well.
+			class_name = "server_only_proc_buff",
+			max_stacks = 1,
+			max_stacks_cap = 1,
+			predicted = false,
+			buff_category = buff_categories.hordes_buff,
+			proc_events = {
+				[proc_events.on_kill] = 1,
+			},
+			check_proc_func = CheckProcFunctions.on_elite_kill,
+			proc_func = function (params, template_data, template_context)
+				Toughness.replenish_percentage(template_context.unit, TOUGHNESS_PER_ELITE_KILL / 100, false)
 
-		proc_counts.cwah_custom_toughness_on_elite_kill = (proc_counts.cwah_custom_toughness_on_elite_kill or 0) + 1
+				proc_counts.cwah_custom_toughness_on_elite_kill =
+					(proc_counts.cwah_custom_toughness_on_elite_kill or 0) + 1
 
-		mod:debug_log("cwah_custom_toughness_on_elite_kill proc #%d", proc_counts.cwah_custom_toughness_on_elite_kill)
+				mod:debug_log("cwah_custom_toughness_on_elite_kill proc #%d",
+					proc_counts.cwah_custom_toughness_on_elite_kill)
+			end,
+		}
 	end,
-}
-
-HordesBuffsData.cwah_custom_toughness_on_elite_kill = {
-	title = "loc_cwah_custom_toughness_title",
-	description = "loc_cwah_custom_toughness_description",
-	icon = ICON_ROOT .. "hordes_buff_toughness_on_melee_kills",
-	is_family_buff = false,
-	filter_category = CATEGORY,
-}
+})
 
 -- ---------------------------------------------------------------------------
 -- Example 3: a pair of templates -- ramp a stat, reset it on a condition
@@ -136,30 +163,43 @@ HordesBuffsData.cwah_custom_toughness_on_elite_kill = {
 
 local CRIT_RAMP_STEP = 0.05
 
--- The controller. This is the one that appears in the pick pool; it holds no
--- stats itself and exists only to add a stack on every non-critical hit.
-BuffTemplates.cwah_crit_ramp = {
-	class_name = "proc_buff",
-	max_stacks = 1,
-	predicted = false,
-	buff_category = buff_categories.hordes_buff,
-	proc_events = {
-		[proc_events.on_hit] = 1,
-	},
-	check_proc_func = function (params, template_data, template_context, t)
-		return not params.is_critical_strike
-	end,
-	start_func = function (template_data, template_context)
-		template_data.buff_extension = ScriptUnit.extension(template_context.unit, "buff_system")
-	end,
-	proc_func = function (params, template_data, template_context, t)
-		template_data.buff_extension:add_internally_controlled_buff("cwah_crit_ramp_stack", t)
+-- The controller. `pool = true` -- this is the one offered; it holds no stats
+-- itself and exists only to add a stack on every non-critical hit.
+_add({
+	id = "cwah_crit_ramp",
+	pool = true,
+	title = "Building Fury",
+	description = "Every hit that does not critically strike raises your critical chance by "
+		.. math.floor(CRIT_RAMP_STEP * 100) .. "%%. Resets when you critically strike.",
+	icon = "hordes_buff_critical_chance_on_dodge",
+	template = function ()
+		return {
+			class_name = "proc_buff",
+			max_stacks = 1,
+			predicted = false,
+			buff_category = buff_categories.hordes_buff,
+			proc_events = {
+				[proc_events.on_hit] = 1,
+			},
+			check_proc_func = function (params, template_data, template_context, t)
+				return not params.is_critical_strike
+			end,
+			start_func = function (template_data, template_context)
+				template_data.buff_extension = ScriptUnit.extension(template_context.unit, "buff_system")
+			end,
+			proc_func = function (params, template_data, template_context, t)
+				template_data.buff_extension:add_internally_controlled_buff("cwah_crit_ramp_stack", t)
 
-		proc_counts.cwah_crit_ramp = (proc_counts.cwah_crit_ramp or 0) + 1
+				proc_counts.cwah_crit_ramp = (proc_counts.cwah_crit_ramp or 0) + 1
+			end,
+		}
 	end,
-}
+})
 
--- The stat carrier. Never offered -- it is only ever added by the controller.
+-- The stat carrier. `pool` absent, so it is registered but never offered -- it
+-- is only ever added by the controller. It still gets a name and a network id,
+-- which is the whole reason helpers belong in the catalogue rather than in a
+-- second list someone can forget to update.
 --
 -- `remove_on_proc` is what makes the reset work, and it is the whole reason
 -- this template procs at all: on a crit the engine calls force_finish on the
@@ -169,38 +209,34 @@ BuffTemplates.cwah_crit_ramp = {
 -- No buff_category on purpose, matching the shipped equivalent: this is an
 -- internal stat carrier, not something the mission-buffs UI should enumerate as
 -- a buff the player was granted.
-BuffTemplates.cwah_crit_ramp_stack = {
-	class_name = "proc_buff",
-	predicted = false,
-	remove_on_proc = true,
-	always_show_in_hud = true,
-	-- A base-game icon on purpose: this one shows in the HUD whether or not the
-	-- Mortis package is loaded, unlike the horde buff artwork.
-	hud_icon = "content/ui/textures/icons/buffs/hud/zealot/zealot_ability_chastise_the_wicked",
-	hud_icon_gradient_map = "content/ui/textures/color_ramps/talent_ability",
-	hud_priority = 1,
-	proc_events = {
-		[proc_events.on_hit] = 1,
-	},
-	check_proc_func = CheckProcFunctions.on_crit,
-	stat_buffs = {
-		[stat_buffs.critical_strike_chance] = CRIT_RAMP_STEP,
-	},
-}
-
--- Cap the ramp at exactly +100%, however the step is tuned. Straight from the
--- shipped version. Crit chance is clamped to 1 anyway
--- (utilities/attack/critical_strike.lua:33) so stacks past this point would be
--- silently wasted rather than wrong.
-BuffTemplates.cwah_crit_ramp_stack.max_stacks = math.ceil(1 / CRIT_RAMP_STEP)
-
-HordesBuffsData.cwah_crit_ramp = {
-	title = "loc_cwah_crit_ramp_title",
-	description = "loc_cwah_crit_ramp_description",
-	icon = ICON_ROOT .. "hordes_buff_critical_chance_on_dodge",
-	is_family_buff = false,
-	filter_category = CATEGORY,
-}
+_add({
+	id = "cwah_crit_ramp_stack",
+	template = function ()
+		return {
+			class_name = "proc_buff",
+			predicted = false,
+			remove_on_proc = true,
+			always_show_in_hud = true,
+			-- A base-game icon on purpose: this one shows in the HUD whether or
+			-- not the Mortis package is loaded, unlike the horde buff artwork.
+			hud_icon = "content/ui/textures/icons/buffs/hud/zealot/zealot_ability_chastise_the_wicked",
+			hud_icon_gradient_map = "content/ui/textures/color_ramps/talent_ability",
+			hud_priority = 1,
+			proc_events = {
+				[proc_events.on_hit] = 1,
+			},
+			check_proc_func = CheckProcFunctions.on_crit,
+			stat_buffs = {
+				[stat_buffs.critical_strike_chance] = CRIT_RAMP_STEP,
+			},
+			-- Cap the ramp at exactly +100%, however the step is tuned.
+			-- Straight from the shipped version. Crit chance is clamped to 1
+			-- anyway (utilities/attack/critical_strike.lua:33) so stacks past
+			-- this point would be silently wasted rather than wrong.
+			max_stacks = math.ceil(1 / CRIT_RAMP_STEP),
+		}
+	end,
+})
 
 -- ---------------------------------------------------------------------------
 -- Example 4: the same ramp shape, reset by going idle
@@ -221,68 +257,78 @@ local ATTACK_SPEED_STEP = 0.02
 local ATTACK_SPEED_CAP = 0.2
 local ATTACK_SPEED_IDLE_RESET = 2
 
-BuffTemplates.cwah_attack_speed_ramp = {
-	class_name = "proc_buff",
-	max_stacks = 1,
-	predicted = false,
-	buff_category = buff_categories.hordes_buff,
-	proc_events = {
-		[proc_events.on_hit] = 1,
-	},
-	start_func = function (template_data, template_context)
-		template_data.buff_extension = ScriptUnit.extension(template_context.unit, "buff_system")
-	end,
-	proc_func = function (params, template_data, template_context, t)
-		template_data.buff_extension:add_internally_controlled_buff("cwah_attack_speed_ramp_stack", t)
+_add({
+	id = "cwah_attack_speed_ramp",
+	pool = true,
+	title = "Relentless",
+	description = "Every hit raises your attack speed by " .. math.floor(ATTACK_SPEED_STEP * 100)
+		.. "%%, up to " .. math.floor(ATTACK_SPEED_CAP * 100) .. "%%. Resets after "
+		.. ATTACK_SPEED_IDLE_RESET .. " seconds without attacking.",
+	icon = "hordes_buff_improved_dodge_speed_and_distance",
+	template = function ()
+		return {
+			class_name = "proc_buff",
+			max_stacks = 1,
+			predicted = false,
+			buff_category = buff_categories.hordes_buff,
+			proc_events = {
+				[proc_events.on_hit] = 1,
+			},
+			start_func = function (template_data, template_context)
+				template_data.buff_extension = ScriptUnit.extension(template_context.unit, "buff_system")
+			end,
+			proc_func = function (params, template_data, template_context, t)
+				template_data.buff_extension:add_internally_controlled_buff("cwah_attack_speed_ramp_stack", t)
 
-		proc_counts.cwah_attack_speed_ramp = (proc_counts.cwah_attack_speed_ramp or 0) + 1
+				proc_counts.cwah_attack_speed_ramp = (proc_counts.cwah_attack_speed_ramp or 0) + 1
+			end,
+		}
 	end,
-}
+})
 
-BuffTemplates.cwah_attack_speed_ramp_stack = {
-	class_name = "proc_buff",
-	predicted = false,
-	always_show_in_hud = true,
-	hud_icon = "content/ui/textures/icons/buffs/hud/cryptic/cryptic_melee_attacks_give_melee_attack_speed",
-	hud_icon_gradient_map = "content/ui/textures/color_ramps/talent_ability",
-	hud_priority = 1,
-	-- Every way of swinging or firing, hit or miss. on_sweep_finish closes a
-	-- melee swing whether or not it connected, on_shoot closes a shot the same
-	-- way, and on_hit covers damage that arrives through neither.
-	proc_events = {
-		[proc_events.on_hit] = 1,
-		[proc_events.on_shoot] = 1,
-		[proc_events.on_sweep_finish] = 1,
-	},
-	stat_buffs = {
-		-- The bonus, not the multiplier: attack_speed is an additive_multiplier
-		-- with a base of 1, so shipped buffs write 0.2 to mean +20%.
-		[stat_buffs.attack_speed] = ATTACK_SPEED_STEP,
-	},
-	start_func = function (template_data, template_context)
-		template_data.last_action_t = template_context.buff:start_time()
+_add({
+	id = "cwah_attack_speed_ramp_stack",
+	template = function ()
+		return {
+			class_name = "proc_buff",
+			predicted = false,
+			always_show_in_hud = true,
+			hud_icon = "content/ui/textures/icons/buffs/hud/cryptic/cryptic_melee_attacks_give_melee_attack_speed",
+			hud_icon_gradient_map = "content/ui/textures/color_ramps/talent_ability",
+			hud_priority = 1,
+			-- Every way of swinging or firing, hit or miss. on_sweep_finish
+			-- closes a melee swing whether or not it connected, on_shoot closes
+			-- a shot the same way, and on_hit covers damage arriving through
+			-- neither.
+			proc_events = {
+				[proc_events.on_hit] = 1,
+				[proc_events.on_shoot] = 1,
+				[proc_events.on_sweep_finish] = 1,
+			},
+			stat_buffs = {
+				-- The bonus, not the multiplier: attack_speed is an
+				-- additive_multiplier with a base of 1, so shipped buffs write
+				-- 0.2 to mean +20%.
+				[stat_buffs.attack_speed] = ATTACK_SPEED_STEP,
+			},
+			start_func = function (template_data, template_context)
+				template_data.last_action_t = template_context.buff:start_time()
+			end,
+			-- No check_proc_func: the point is that the attack happened at all.
+			proc_func = function (params, template_data, template_context, t)
+				template_data.last_action_t = t
+			end,
+			-- Returning true sets _finished, and the extension then drops one
+			-- stack per frame until the buff is gone -- a full reset rather than
+			-- a slow decay, because _finished is never cleared once set on a
+			-- buff with no duration.
+			conditional_exit_func = function (template_data, template_context, dt, t)
+				return ATTACK_SPEED_IDLE_RESET < t - template_data.last_action_t
+			end,
+			max_stacks = math.ceil(ATTACK_SPEED_CAP / ATTACK_SPEED_STEP),
+		}
 	end,
-	-- No check_proc_func: the point is that the attack happened at all.
-	proc_func = function (params, template_data, template_context, t)
-		template_data.last_action_t = t
-	end,
-	-- Returning true sets _finished, and the extension then drops one stack per
-	-- frame until the buff is gone -- a full reset rather than a slow decay,
-	-- because _finished is never cleared once set on a buff with no duration.
-	conditional_exit_func = function (template_data, template_context, dt, t)
-		return ATTACK_SPEED_IDLE_RESET < t - template_data.last_action_t
-	end,
-}
-
-BuffTemplates.cwah_attack_speed_ramp_stack.max_stacks = math.ceil(ATTACK_SPEED_CAP / ATTACK_SPEED_STEP)
-
-HordesBuffsData.cwah_attack_speed_ramp = {
-	title = "loc_cwah_attack_speed_ramp_title",
-	description = "loc_cwah_attack_speed_ramp_description",
-	icon = ICON_ROOT .. "hordes_buff_improved_dodge_speed_and_distance",
-	is_family_buff = false,
-	filter_category = CATEGORY,
-}
+})
 
 -- ---------------------------------------------------------------------------
 -- Example 5: reacting to something the buff system has no event for
@@ -343,21 +389,23 @@ local STATUS_EFFECTS = {
 -- Carries nothing itself. All the behaviour lives in the hook, which checks
 -- whether the attacking player has this buff -- so the template exists purely
 -- to be pickable and to be asked about.
-BuffTemplates.cwah_status_cascade = {
-	class_name = "buff",
-	max_stacks = 1,
-	max_stacks_cap = 1,
-	predicted = false,
-	buff_category = buff_categories.hordes_buff,
-}
-
-HordesBuffsData.cwah_status_cascade = {
-	title = "loc_cwah_status_cascade_title",
-	description = "loc_cwah_status_cascade_description",
-	icon = ICON_ROOT .. "hordes_buff_rending_on_ranged_critical_hit",
-	is_family_buff = false,
-	filter_category = CATEGORY,
-}
+_add({
+	id = CASCADE_BUFF,
+	pool = true,
+	title = "Contagion",
+	description = "Whenever you afflict an enemy with a status effect, they suffer a second one at random - "
+		.. "soulblaze, fire, electrocution, bleed, chem toxin or brittleness.",
+	icon = "hordes_buff_rending_on_ranged_critical_hit",
+	template = function ()
+		return {
+			class_name = "buff",
+			max_stacks = 1,
+			max_stacks_cap = 1,
+			predicted = false,
+			buff_category = buff_categories.hordes_buff,
+		}
+	end,
+})
 
 -- Deliberately "some other effect", never the one that just landed.
 --
@@ -605,64 +653,37 @@ end
 -- Registration
 -- ---------------------------------------------------------------------------
 
--- Offered to the player. Everything here needs a HordesBuffsData entry.
-local POOL = {
-	"cwah_custom_damage",
-	"cwah_custom_toughness_on_elite_kill",
-	"cwah_crit_ramp",
-	"cwah_attack_speed_ramp",
-	"cwah_status_cascade",
-}
-
--- Applied by other buffs rather than picked, so deliberately absent from the
--- pool -- but still applied to the player, so they need exactly the same name
--- and network-id registration. Missing either crashes on apply.
-local HELPER_TEMPLATES = {
-	"cwah_crit_ramp_stack",
-	"cwah_attack_speed_ramp_stack",
-}
-
+-- Loc keys are DERIVED from the id -- loc_<id>_title and loc_<id>_description --
+-- exactly as hordes_buffs_data.lua derives them for the shipped buffs. There is
+-- no second place for a key and a template to disagree.
+--
 -- Descriptions are run through Managers.localization:localize, so literal text
--- in HordesBuffsData renders as a missing-key marker. DMF's global database is
+-- in HordesBuffsData renders as a missing-key marker; DMF's global database is
 -- what makes a mod-defined key resolve like a shipped one.
-mod:add_global_localize_strings({
-	loc_cwah_custom_damage_title = {
-		en = "Wrath Unbound",
-	},
-	loc_cwah_custom_damage_description = {
-		en = "Increases all damage you deal by 15%%.",
-	},
-	loc_cwah_custom_toughness_title = {
-		en = "Bulwark",
-	},
-	-- %% not %: DMF runs every localization string through string.format, so a
-	-- literal per-cent sign is read as a format specifier and the lookup fails.
-	loc_cwah_custom_toughness_description = {
-		en = "Killing an elite restores " .. TOUGHNESS_PER_ELITE_KILL .. "%% toughness.",
-	},
-	loc_cwah_crit_ramp_title = {
-		en = "Building Fury",
-	},
-	loc_cwah_crit_ramp_description = {
-		en = "Every hit that does not critically strike raises your critical chance by "
-			.. math.floor(CRIT_RAMP_STEP * 100) .. "%%. Resets when you critically strike.",
-	},
-	loc_cwah_attack_speed_ramp_title = {
-		en = "Relentless",
-	},
-	loc_cwah_attack_speed_ramp_description = {
-		en = "Every hit raises your attack speed by " .. math.floor(ATTACK_SPEED_STEP * 100)
-			.. "%%, up to " .. math.floor(ATTACK_SPEED_CAP * 100) .. "%%. Resets after "
-			.. ATTACK_SPEED_IDLE_RESET .. " seconds without attacking.",
-	},
-	loc_cwah_status_cascade_title = {
-		en = "Contagion",
-	},
-	loc_cwah_status_cascade_description = {
-		en = "Whenever you afflict an enemy with a status effect, they suffer a second one at random - "
-			.. "soulblaze, fire, electrocution, bleed, chem toxin or brittleness.",
-	},
-})
+--
+-- Remember %% not %: DMF runs every localization string through string.format,
+-- so a literal per-cent sign is read as a format specifier and the lookup
+-- silently returns nil.
+local function _title_key(id)
+	return "loc_" .. id .. "_title"
+end
+
+local function _description_key(id)
+	return "loc_" .. id .. "_description"
+end
+
+do
+	local strings = {}
+
+	for _, entry in ipairs(CATALOGUE) do
+		if entry.pool then
+			strings[_title_key(entry.id)] = { en = entry.title or entry.id }
+			strings[_description_key(entry.id)] = { en = entry.description or "" }
+		end
+	end
+
+	mod:add_global_localize_strings(strings)
+end
 
 -- Every template also needs an entry in the network lookup.
 --
@@ -678,10 +699,21 @@ mod:add_global_localize_strings({
 -- only __index is guarded, so appending is allowed. Membership has to be tested
 -- with rawget: a plain read of a missing key is the crash itself.
 --
--- Solo-only by nature. The id is an index into a table no other peer has, so it
--- must never actually be transmitted -- which holds because a solo session has
--- no remote players. Idempotent, and called again per mission in case the mod
--- loaded before NetworkLookup existed.
+-- Solo-only *today*, but deliberately not solo-only by construction.
+--
+-- The id is an index into a table no vanilla peer has, so it must never be
+-- transmitted -- which holds because a solo session has no remote players. If a
+-- peer-to-peer path ever exists and every peer runs this mod, the indices only
+-- agree if every machine computes the same one for the same name. So the names
+-- are appended in SORTED order (see register_network_lookup), which makes an
+-- index a pure function of the name set rather than of catalogue order.
+--
+-- What that still does not survive: peers on different mod versions (different
+-- name sets), or another mod appending to the same lookup, since the base offset
+-- then depends on mod_load_order.txt. Both would need a version handshake.
+--
+-- Idempotent, and called again per mission in case the mod loaded before
+-- NetworkLookup existed.
 custom_buffs.ensure_network_id = function (buff_name)
 	local network_lookup = rawget(_G, "NetworkLookup")
 	local buff_lookup = network_lookup and network_lookup.buff_templates
@@ -704,16 +736,32 @@ custom_buffs.ensure_network_id = function (buff_name)
 	return true
 end
 
--- Every template the mod defines, pickable or not.
+-- Every template the mod defines, pickable or not, sorted.
+--
+-- Sorted rather than catalogue order so the network ids assigned below are a
+-- pure function of the name set. Reordering the catalogue then cannot change an
+-- id, which is what a future peer-to-peer path would need.
 local function _all_template_names()
 	local names = {}
 
-	for _, buff_name in ipairs(POOL) do
-		names[#names + 1] = buff_name
+	for _, entry in ipairs(CATALOGUE) do
+		names[#names + 1] = entry.id
 	end
 
-	for _, buff_name in ipairs(HELPER_TEMPLATES) do
-		names[#names + 1] = buff_name
+	table.sort(names)
+
+	return names
+end
+
+-- Just the pickable ones, in catalogue order -- this only drives the pool and
+-- the menu, where the author's ordering is the useful one.
+local function _pool_names()
+	local names = {}
+
+	for _, entry in ipairs(CATALOGUE) do
+		if entry.pool then
+			names[#names + 1] = entry.id
+		end
 	end
 
 	return names
@@ -738,21 +786,57 @@ custom_buffs.register = function ()
 
 	registered = true
 
-	-- Every template needs a `name` matching its key.
-	--
-	-- The game sets this for shipped buffs when it assembles BuffTemplates
-	-- (`template.name = template.name or name`), so a template added straight
-	-- into the table never gets one. BuffExtensionBase._add_buff then uses it
-	-- as a table key for stack tracking, and a nil key crashes the moment the
-	-- buff is applied -- not when it is offered, so the card looks fine right
-	-- up until you pick it.
-	for _, buff_name in ipairs(_all_template_names()) do
-		local template = BuffTemplates[buff_name]
+	-- Build every template from its catalogue entry, then everything the buff
+	-- system needs alongside it. One loop, so a new entry cannot be half
+	-- registered.
+	for _, entry in ipairs(CATALOGUE) do
+		local template
+
+		if entry.template then
+			template = entry.template()
+		elseif entry.stat_buffs then
+			-- The shorthand: a plain passive buff.
+			template = {
+				class_name = "buff",
+				max_stacks = 1,
+				max_stacks_cap = 1,
+				predicted = false,
+				buff_category = buff_categories.hordes_buff,
+				stat_buffs = entry.stat_buffs,
+			}
+		else
+			mod:error("catalogue entry '%s' has neither a template nor stat_buffs - skipped",
+				tostring(entry.id))
+		end
 
 		if template then
-			template.name = template.name or buff_name
-		else
-			mod:error("custom buff '%s' is registered but has no template", buff_name)
+			-- Every template needs a `name` matching its key.
+			--
+			-- The game sets this for shipped buffs when it assembles
+			-- BuffTemplates (`template.name = template.name or name`), so a
+			-- template added straight into the table never gets one.
+			-- BuffExtensionBase._add_buff then uses it as a table key for stack
+			-- tracking, and a nil key crashes the moment the buff is applied --
+			-- not when it is offered, so the card looks fine right up until you
+			-- pick it.
+			template.name = template.name or entry.id
+
+			BuffTemplates[entry.id] = template
+
+			-- Card data for the pickable ones only. filter_category is mandatory
+			-- and easy to forget by hand: init_legendary_buffs_pool_for_player
+			-- indexes the pool table by it and inserts into the result, so
+			-- omitting it is a nil-index crash at mission start, a long way from
+			-- the buff that caused it.
+			if entry.pool then
+				HordesBuffsData[entry.id] = {
+					title = _title_key(entry.id),
+					description = _description_key(entry.id),
+					icon = entry.icon and (ICON_ROOT .. entry.icon) or nil,
+					is_family_buff = entry.is_family_buff or false,
+					filter_category = CATEGORY,
+				}
+			end
 		end
 	end
 
@@ -781,8 +865,9 @@ custom_buffs.register = function ()
 	custom_buffs.install_hooks()
 
 	local generic = MissionBuffsAllowedBuffs.legendary_buffs.generic
+	local pool = _pool_names()
 
-	for _, buff_name in ipairs(POOL) do
+	for _, buff_name in ipairs(pool) do
 		local already = false
 
 		for _, existing in ipairs(generic) do
@@ -798,7 +883,8 @@ custom_buffs.register = function ()
 		end
 	end
 
-	mod:info("registered %d custom buff(s) in category '%s'", #POOL, CATEGORY)
+	mod:info("registered %d custom buff(s) in category '%s' (%d template(s) total)",
+		#pool, CATEGORY, #CATALOGUE)
 end
 
 -- How often the custom category comes up relative to the shipped ones.
@@ -851,7 +937,7 @@ custom_buffs.report = function ()
 
 	-- Attached: walks the live buff instances, so it reflects what the buff
 	-- system believes, not what the mod asked for.
-	for _, buff_name in ipairs(POOL) do
+	for _, buff_name in ipairs(_pool_names()) do
 		local active = buff_extension:has_buff_using_buff_template(buff_name)
 
 		lines[#lines + 1] = string.format("%s: %s", buff_name, active and "ACTIVE" or "not active")
@@ -904,7 +990,7 @@ custom_buffs.reset_counters = function ()
 end
 
 custom_buffs.buff_names = function ()
-	return POOL
+	return _pool_names()
 end
 
 return custom_buffs
