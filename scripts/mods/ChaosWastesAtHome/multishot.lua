@@ -58,6 +58,15 @@ end
 -- including bots -- so the buff has to be checked on the unit doing the
 -- shooting, not on the local player.
 local function _wants_multishot(action)
+	-- Is one of OUR missions running. Hooks outlive missions -- finishing a run
+	-- does not unhook anything -- so without this these keep inspecting every
+	-- shot fired by anyone in whatever the player does next, including hosted
+	-- multiplayer. Nobody would have the buff, but the work is wrong and the
+	-- inspection itself is not free of risk (see below).
+	if not mod.manager then
+		return false
+	end
+
 	local player_unit = action._player_unit
 
 	if not player_unit or not HEALTH_ALIVE[player_unit] then
@@ -66,7 +75,14 @@ local function _wants_multishot(action)
 
 	local buff_extension = ScriptUnit.has_extension(player_unit, "buff_system")
 
-	if not buff_extension then
+	-- Duck-typed rather than assumed. Not every buff extension is a
+	-- BuffExtensionBase: PlayerHuskBuffExtension is its own class and
+	-- implements only part of the interface, so has_buff_using_buff_template is
+	-- nil on remote players' units. The Contagion hook learned that the noisy
+	-- way. Identity against the local player is the tighter test used there,
+	-- but this hook legitimately fires for bot units too, so the method check
+	-- is the right shape here.
+	if not buff_extension or not buff_extension.has_buff_using_buff_template then
 		return false
 	end
 

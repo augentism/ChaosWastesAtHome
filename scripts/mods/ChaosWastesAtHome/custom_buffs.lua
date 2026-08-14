@@ -623,13 +623,44 @@ custom_buffs.install_hooks = function ()
 			return
 		end
 
-		if not mod:is_enabled() then
+		-- Not just "is the mod on" -- is one of OUR missions running.
+		--
+		-- Hooks outlive missions. Toggling the mod off unhooks them, but
+		-- finishing a run does not, so this kept firing for every buff applied
+		-- to every enemy in whatever the player did next -- including a hosted
+		-- multiplayer mission, where it has no business running at all. Nothing
+		-- would have cascaded (nobody has the buff), but doing the work was
+		-- wrong before it was also unsafe, and the guard below is only
+		-- reachable because this one was missing.
+		if not mod.manager or not mod:is_enabled() then
 			return
 		end
 
 		-- Without an owner there is nobody to credit, and no way to tell our
 		-- player's status effects from an enemy's or a hazard's.
 		if not owner_unit or not HEALTH_ALIVE[owner_unit] then
+			return
+		end
+
+		-- The owner must be OUR player, not merely something with a buff
+		-- extension. Two reasons, and the second one is a crash:
+		--
+		-- 1. This mod is solo-only. Another player's status effects are not
+		--    ours to cascade from even if we could see them.
+		-- 2. In a hosted mission the owner is usually a remote player's HUSK,
+		--    and PlayerHuskBuffExtension is a standalone class -- NOT a
+		--    BuffExtensionBase subclass (player_husk_buff_extension.lua:4). It
+		--    implements has_keyword, buffs and current_stacks but not
+		--    has_buff_using_buff_template, so calling that on one is an
+		--    "attempt to call method (a nil value)" error, once per status
+		--    effect applied anywhere in the mission.
+		--
+		-- Identity is the right test rather than duck-typing the method: it
+		-- states the actual requirement, and it is one comparison instead of a
+		-- table lookup on a path that runs for every buff on every enemy.
+		local local_player = Managers.player and Managers.player:local_player_safe(1)
+
+		if not local_player or owner_unit ~= local_player.player_unit then
 			return
 		end
 

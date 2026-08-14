@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "0.2.0"
+mod.version = "0.3.2"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -313,7 +313,31 @@ mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self,
 		return func(self, player, is_respawn)
 	end
 
-	local id = player:account_id()
+	-- Bots reach this hook too -- bot_gameplay.lua:36 calls the same
+	-- spawn_player -- and holding their pool init serves no purpose: this
+	-- deferral exists so the LOCAL player's blitz and combat ability have
+	-- resolved before the legendary pool is filtered against them, and nobody
+	-- ever sees a bot's cards.
+	--
+	-- It also crashed. BotPlayer extends HumanPlayer, so account_id() exists and
+	-- looks safe; it just returns nil, because bots are built without one
+	-- (bot_player.lua:8 passes no account id to the constructor). Using that as
+	-- a table key is "table index is nil" -- a hard crash, not a caught hook
+	-- error, because it happens in our own hook body rather than inside a pcall.
+	if not player.is_human_controlled or not player:is_human_controlled() then
+		return func(self, player, is_respawn)
+	end
+
+	-- unique_id() rather than account_id(): every player class has one and it is
+	-- the first constructor argument for humans, remotes and bots alike. The nil
+	-- check stays regardless -- the cost of being wrong here is a crash, and the
+	-- fallback (no deferral) is exactly the behaviour that shipped before it.
+	local id = player.unique_id and player:unique_id()
+
+	if not id then
+		return func(self, player, is_respawn)
+	end
+
 	local entry = pending_pool_init[id]
 
 	if not entry then
