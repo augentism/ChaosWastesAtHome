@@ -21,8 +21,10 @@ multishot.BUFF_NAME = "cwah_multishot"
 local EXTRA_SHOTS = 4
 local FAN_STEP_DEGREES = 5
 
-multishot.DESCRIPTION = "Ranged weapons fire " .. (EXTRA_SHOTS + 1)
-	.. " shots at once, fanned out horizontally, for the same ammunition."
+-- Exported for the card text, which lives in the localization file. See the
+-- note in custom_buffs.lua on why the number is substituted rather than being
+-- a {token} the way shipped cards do it.
+multishot.SHOTS = EXTRA_SHOTS + 1
 
 -- Precomputed yaw offsets for the extra shots: the aimed shot is fired
 -- separately, so this is -2, -1, +1, +2 steps for the default of four.

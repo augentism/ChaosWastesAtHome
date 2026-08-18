@@ -102,22 +102,38 @@ local ICON_ROOT = "content/ui/textures/icons/buffs/hud/horde_buffs/small_buffs/"
 --   pool          true = offered in legendary picks. false/absent = a helper
 --                 applied by another buff, which still needs a name and a
 --                 network id but no card data and no pool membership
---   title         English name. The loc KEY is derived as loc_<id>_title, the
---   description   same way the game derives them in hordes_buffs_data.lua, so
---                 there is no second place for the two to disagree
 --   icon          short name, appended to ICON_ROOT. Pool entries only
+--   values        optional array substituted into the description's %s slots,
+--                 in order. Numbers belong to the code; wording belongs to the
+--                 localization file, and this is the seam between them
 --   stat_buffs    shorthand for a plain passive buff
 --   template      factory returning the full template, for anything else. Given
 --                 a factory, `stat_buffs` is ignored -- put them in the table
 --
+-- The NAME and DESCRIPTION of a pool entry are not here. They live in
+-- ChaosWastesAtHome_localization.lua under loc_<id>_title and
+-- loc_<id>_description -- the same convention hordes_buffs_data.lua uses for the
+-- shipped buffs -- so they are translatable like every other string in the mod.
+-- Adding a buff means adding an entry here AND those two keys there.
+--
 -- Entries are appended by each example section below, so the file still reads
--- as five worked examples rather than one wall of data.
+-- as worked examples rather than one wall of data.
 local CATALOGUE = {}
 
 local function _add(entry)
 	CATALOGUE[#CATALOGUE + 1] = entry
 
 	return entry
+end
+
+-- Values substituted into a description's %s slots at registration time.
+--
+-- Doubled per-cent signs are not a typo. The string we register is run through
+-- string.format once more on its way out of DMF's global lookup, and a lone %
+-- there is an invalid specifier -- which fails the whole lookup and puts the raw
+-- key on the card instead of the text.
+local function _pct(fraction)
+	return string.format("%d%%%%", math.floor(fraction * 100 + 0.5))
 end
 
 -- ---------------------------------------------------------------------------
@@ -127,14 +143,15 @@ end
 -- The `stat_buffs` shorthand: register builds a plain passive template from it.
 -- `filter_category` is written for you, which matters -- omitting it is a
 -- nil-index crash at mission start, a long way from the buff that caused it.
+local DAMAGE_MULTIPLIER = 1.15
+
 _add({
 	id = "cwah_custom_damage",
 	pool = true,
-	title = "Wrath Unbound",
-	description = "Increases all damage you deal by 15%%.",
 	icon = "hordes_buff_damage_increase",
+	values = { _pct(DAMAGE_MULTIPLIER - 1) },
 	stat_buffs = {
-		[stat_buffs.damage] = 1.15,
+		[stat_buffs.damage] = DAMAGE_MULTIPLIER,
 	},
 })
 
@@ -148,9 +165,8 @@ local TOUGHNESS_PER_ELITE_KILL = 15
 _add({
 	id = "cwah_custom_toughness_on_elite_kill",
 	pool = true,
-	title = "Bulwark",
-	description = "Killing an elite restores " .. TOUGHNESS_PER_ELITE_KILL .. "%% toughness.",
 	icon = "hordes_buff_toughness_on_melee_kills",
+	values = { _pct(TOUGHNESS_PER_ELITE_KILL / 100) },
 	template = function ()
 		return {
 			-- server_only_proc_buff, not proc_buff: the effect changes
@@ -200,10 +216,8 @@ local CRIT_RAMP_STEP = 0.05
 _add({
 	id = "cwah_crit_ramp",
 	pool = true,
-	title = "Building Fury",
-	description = "Every hit that does not critically strike raises your critical chance by "
-		.. math.floor(CRIT_RAMP_STEP * 100) .. "%%. Resets when you critically strike.",
 	icon = "hordes_buff_critical_chance_on_dodge",
+	values = { _pct(CRIT_RAMP_STEP) },
 	template = function ()
 		return {
 			class_name = "proc_buff",
@@ -301,11 +315,8 @@ local ATTACK_SPEED_IDLE_RESET = 2
 _add({
 	id = "cwah_attack_speed_ramp",
 	pool = true,
-	title = "Relentless",
-	description = "Every hit raises your attack speed by " .. math.floor(ATTACK_SPEED_STEP * 100)
-		.. "%%, up to " .. math.floor(ATTACK_SPEED_CAP * 100) .. "%%. Resets after "
-		.. ATTACK_SPEED_IDLE_RESET .. " seconds without attacking.",
 	icon = "hordes_buff_improved_dodge_speed_and_distance",
+	values = { _pct(ATTACK_SPEED_STEP), _pct(ATTACK_SPEED_CAP), ATTACK_SPEED_IDLE_RESET },
 	template = function ()
 		return {
 			class_name = "proc_buff",
@@ -438,9 +449,6 @@ local STATUS_EFFECTS = {
 _add({
 	id = CASCADE_BUFF,
 	pool = true,
-	title = "Contagion",
-	description = "Whenever you afflict an enemy with a status effect, they suffer a second one at random - "
-		.. "soulblaze, fire, electrocution, bleed, chem toxin or brittleness.",
 	icon = "hordes_buff_rending_on_ranged_critical_hit",
 	template = function ()
 		return {
@@ -758,10 +766,8 @@ end
 _add({
 	id = "cwah_flayer",
 	pool = true,
-	title = "Flayer",
-	description = "Every hit has a " .. math.floor(FLAYER_CHANCE * 100)
-		.. "%% chance to burst the target's skull.",
 	icon = "hordes_buff_explode_enemies_on_critical_kill",
+	values = { _pct(FLAYER_CHANCE) },
 	template = function ()
 		return {
 			class_name = "server_only_proc_buff",
@@ -864,8 +870,6 @@ local CARRIED_STACKS = {}
 _add({
 	id = "cwah_proliferation",
 	pool = true,
-	title = "Proliferation",
-	description = "When an enemy you have afflicted dies, every status effect on it spreads to nearby enemies.",
 	icon = "hordes_buff_burning_damage_per_burning_enemy",
 	template = function ()
 		return {
@@ -1007,9 +1011,8 @@ _add({
 _add({
 	id = arc_chain.BUFF_NAME,
 	pool = true,
-	title = "Chain Lightning",
-	description = arc_chain.DESCRIPTION,
 	icon = "hordes_buff_shock_closest_enemy_on_interval",
+	values = { _pct(arc_chain.CHANCE), arc_chain.MAX_JUMPS, arc_chain.SHOCK_DURATION },
 	template = arc_chain.template,
 })
 
@@ -1050,9 +1053,8 @@ end
 _add({
 	id = multishot.BUFF_NAME,
 	pool = true,
-	title = "Multishot",
-	description = multishot.DESCRIPTION,
 	icon = "hordes_buff_ranged_attacks_hit_mass_penetration_increased",
+	values = { multishot.SHOTS },
 	template = multishot.template,
 })
 
@@ -1079,18 +1081,93 @@ local function _description_key(id)
 	return "loc_" .. id .. "_description"
 end
 
-do
-	local strings = {}
+-- Card text lives in the mod's localization file like every other string, and is
+-- copied into DMF's GLOBAL database here. Both halves are load-bearing.
+--
+-- A mod's own localization table is only reachable through mod:localize, and we
+-- are not the ones drawing the card. MissionBuffsParser renders it with
+-- Managers.localization:localize (mission_buffs_parser.lua:125) -- the game's
+-- manager, which has never heard of a mod's private table. DMF hooks that
+-- manager and consults _global_localization_database first
+-- (dmf/modules/core/localization.lua:95), and add_global_localize_strings is the
+-- only way into it.
+--
+-- Read with io_dofile rather than through mod:localize because that returns one
+-- already-resolved string, and what we want is the whole per-language table so a
+-- Russian player gets Russian. The file is pure data and DMF has already loaded
+-- it by the time the script phase runs, so re-executing it is only a parse.
+local LOCALIZATION_FILE = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/ChaosWastesAtHome_localization"
+
+-- Numbers are substituted here, NOT left as {tokens} for the parser.
+--
+-- The shipped cards put {tokens} in the string and let MissionBuffsParser fill
+-- them from a buff_stats table. That mechanism is unavailable to a mod: token
+-- expansion happens in LocalizationManager._process_string, and DMF's hook
+-- answers the lookup and returns before the game's localize ever runs. A
+-- {token} in a mod-registered string reaches the card verbatim.
+--
+-- So string.format, at registration, once. Note the string DMF hands back is
+-- itself string.format'd on the way out, which is why _pct doubles its sign.
+local function _register_card_strings()
+	local ok, strings = pcall(mod.io_dofile, mod, LOCALIZATION_FILE)
+
+	if not ok or type(strings) ~= "table" then
+		mod:error("could not read the localization file for card text: %s", tostring(strings))
+
+		return
+	end
+
+	local globals = {}
+
+	local function _take(key, values)
+		local translations = strings[key]
+
+		-- Loud, because the quiet version is a card in the wild reading
+		-- "<loc_cwah_something_title>".
+		if type(translations) ~= "table" then
+			mod:error("localization key '%s' is missing - its card will show the key instead", key)
+
+			return
+		end
+
+		if not values then
+			globals[key] = translations
+
+			return
+		end
+
+		-- Formatted per language: the values and their order are the same
+		-- everywhere, the sentence around them is not.
+		local formatted = {}
+
+		for language, text in pairs(translations) do
+			local format_ok, result = pcall(string.format, text, unpack(values))
+
+			formatted[language] = format_ok and result or text
+
+			if not format_ok then
+				mod:error("localization key '%s' (%s) does not match its values: %s",
+					key, tostring(language), tostring(result))
+			end
+		end
+
+		globals[key] = formatted
+	end
 
 	for _, entry in ipairs(CATALOGUE) do
 		if entry.pool then
-			strings[_title_key(entry.id)] = { en = entry.title or entry.id }
-			strings[_description_key(entry.id)] = { en = entry.description or "" }
+			_take(_title_key(entry.id))
+			_take(_description_key(entry.id), entry.values)
 		end
 	end
 
-	mod:add_global_localize_strings(strings)
+	-- One-way: add_global_localize_strings refuses to overwrite a key it already
+	-- holds. A mod reload therefore keeps the card text from the first load, so
+	-- editing a description needs a full restart to see.
+	mod:add_global_localize_strings(globals)
 end
+
+_register_card_strings()
 
 -- Every template also needs an entry in the network lookup.
 --

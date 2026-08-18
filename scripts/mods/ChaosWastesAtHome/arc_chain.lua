@@ -176,10 +176,11 @@ local function _blocked(key)
 	return false
 end
 
-arc_chain.DESCRIPTION = "Hits have a " .. math.floor(ARC_CHANCE * 100)
-	.. "%% chance to arc lightning through up to " .. MAX_JUMPS
-	.. " nearby enemies, damaging and electrocuting each. An enemy the lightning has just "
-	.. "passed through cannot start another arc for " .. SHOCK_DURATION .. " second(s)."
+-- Exported for the card text, which is written in the localization file and
+-- formatted with these at registration. Tuning stays here; wording stays there.
+arc_chain.CHANCE = ARC_CHANCE
+arc_chain.MAX_JUMPS = MAX_JUMPS
+arc_chain.SHOCK_DURATION = SHOCK_DURATION
 
 -- The nearest living enemy to `from_position` that this chain has not already
 -- hit.

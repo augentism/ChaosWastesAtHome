@@ -170,6 +170,8 @@ buff is misbehaving, the sequence of snapshots usually shows it directly.
 
 ## Credits
 
-- Simplified Chinese translation contributed by a player. Two option
-  descriptions changed after it was written and currently fall back to English;
-  updated translations welcome.
+- Simplified Chinese and Russian translations contributed by players.
+  Russian covers every string; Simplified Chinese covers most of them, and
+  anything missing falls back to English. The mod's own custom buffs are named
+  and described in code and are English-only in every language — updated
+  translations welcome.
