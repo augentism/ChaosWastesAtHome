@@ -44,6 +44,8 @@ end
 -- instant the choice resolves -- by click or by the timeout auto-pick -- so
 -- this single predicate covers both ways out without hooking either path, and
 -- self-corrects if the card disappears for some reason we did not anticipate.
+-- Also gated on should_draw, so the pause does not engage before the card is
+-- actually on screen (spawn-in intro, cutscene).
 local function _choice_is_up()
 	local element = _element()
 
@@ -53,7 +55,11 @@ local function _choice_is_up()
 
 	local context = element._context
 
-	return context ~= nil and context.is_choice == true and not context.buff_chosen
+	if context == nil or context.is_choice ~= true or context.buff_chosen then
+		return false
+	end
+
+	return element:should_draw()
 end
 
 local function _is_server()
