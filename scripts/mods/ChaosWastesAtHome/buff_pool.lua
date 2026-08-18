@@ -6,13 +6,20 @@ local MissionBuffsAllowedBuffs = require("scripts/managers/mission_buffs/mission
 -- Which buffs are allowed into the roll pools, and the catalogue the toggle
 -- view is built from.
 --
--- Enabled is the default and is not stored: only the disabled names are, so a
--- fresh install persists nothing and a buff added by a later patch arrives
--- enabled rather than silently missing.
+-- Enabled is the default for almost everything, and defaults are not stored:
+-- only explicit player choices are, so a fresh install persists nothing and a
+-- buff added by a later patch arrives enabled rather than silently missing.
+--
+-- "Almost", because a buff can ship default-off (custom_buffs marks those). That
+-- is why there are two stored sets rather than one. With only a disabled list
+-- there is no way to tell "the player has never had an opinion about this" from
+-- "the player switched it on", and a default-off buff needs those to differ --
+-- otherwise enabling it would be forgotten the moment anything else was saved.
 
 local buff_pool = {}
 
 local SETTING_ID = "disabled_buffs"
+local ENABLED_SETTING_ID = "enabled_buffs"
 local CUSTOM_CATEGORY = "custom"
 
 -- Group ids are persistence-free (they only drive the filter list), but the
@@ -247,45 +254,80 @@ local function _disabled_table()
 	return type(stored) == "table" and stored or {}
 end
 
+-- Names the player has explicitly switched ON. Only meaningful for default-off
+-- buffs; harmless and ignored for everything else.
+local function _enabled_table()
+	local stored = mod:get(ENABLED_SETTING_ID)
+
+	return type(stored) == "table" and stored or {}
+end
+
+-- Read from `mod` rather than imported: custom_buffs publishes it there during
+-- registration, and requiring that module from here would load a second copy of
+-- it (mod:io_dofile re-executes rather than caching).
+local function _is_default_off(name)
+	local defaults = mod._default_off_buffs
+
+	return defaults ~= nil and defaults[name] == true
+end
+
+-- Explicit choice wins in both directions; the catalogue default only decides
+-- for names the player has never touched.
 buff_pool.is_enabled = function (name)
-	return not _disabled_table()[name]
+	if _disabled_table()[name] then
+		return false
+	end
+
+	if _is_default_off(name) then
+		return _enabled_table()[name] == true
+	end
+
+	return true
 end
 
 -- Stored as a name -> true hash and never as an array: SJSON cannot serialize a
 -- table with both array and hash parts, and DMF settings land in
 -- user_settings.config through SJSON.
-buff_pool.set_enabled = function (name, enabled)
-	local disabled = _disabled_table()
+-- Both sides are written every time, so the two tables can never disagree about
+-- a name.
+--
+-- Stored as name -> true hashes and never as arrays: SJSON cannot serialize a
+-- table with both array and hash parts, and DMF settings land in
+-- user_settings.config through SJSON.
+local function _apply(names, enabled)
+	enabled = enabled and true or false
 
-	if enabled then
-		disabled[name] = nil
-	else
-		disabled[name] = true
+	local disabled = _disabled_table()
+	local explicit = _enabled_table()
+
+	for i = 1, #names do
+		local name = names[i]
+
+		disabled[name] = not enabled or nil
+		explicit[name] = enabled or nil
 	end
 
 	mod:set(SETTING_ID, disabled, false)
+	mod:set(ENABLED_SETTING_ID, explicit, false)
+end
+
+local ONE = {}
+
+buff_pool.set_enabled = function (name, enabled)
+	ONE[1] = name
+
+	_apply(ONE, enabled)
 end
 
 buff_pool.set_group_enabled = function (group, enabled)
-	local disabled = _disabled_table()
-
-	for _, name in ipairs(group.names) do
-		if enabled then
-			disabled[name] = nil
-		else
-			disabled[name] = true
-		end
-	end
-
-	mod:set(SETTING_ID, disabled, false)
+	_apply(group.names, enabled)
 end
 
 buff_pool.group_counts = function (group)
-	local disabled = _disabled_table()
 	local on = 0
 
 	for _, name in ipairs(group.names) do
-		if not disabled[name] then
+		if buff_pool.is_enabled(name) then
 			on = on + 1
 		end
 	end
@@ -293,11 +335,17 @@ buff_pool.group_counts = function (group)
 	return on, #group.names
 end
 
+-- Counts what is actually off, which is no longer the same as the size of the
+-- disabled table: a default-off buff nobody has touched is in neither table.
 buff_pool.disabled_count = function ()
 	local count = 0
 
-	for _ in pairs(_disabled_table()) do
-		count = count + 1
+	for _, group in ipairs(buff_pool.groups()) do
+		for _, name in ipairs(group.names) do
+			if not buff_pool.is_enabled(name) then
+				count = count + 1
+			end
+		end
 	end
 
 	return count
@@ -314,15 +362,22 @@ end
 --
 -- Deliberately additive: the same table carries the run's already-owned buffs,
 -- and clobbering it would re-offer everything the player has.
+-- Walks the catalogue rather than the stored table, because "off" is no longer
+-- the same as "stored as disabled" -- a default-off buff the player has never
+-- touched appears in neither set and would otherwise leak into the pool.
 buff_pool.apply_exclusions = function (exclude)
 	local count = 0
 
-	for name in pairs(_disabled_table()) do
-		if not exclude[name] then
-			exclude[name] = true
-		end
+	for _, group in ipairs(buff_pool.groups()) do
+		for _, name in ipairs(group.names) do
+			if not buff_pool.is_enabled(name) then
+				if not exclude[name] then
+					exclude[name] = true
+				end
 
-		count = count + 1
+				count = count + 1
+			end
+		end
 	end
 
 	return count

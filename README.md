@@ -59,8 +59,9 @@ One keybind, and what it opens depends on where you are:
 | Anything already open | Closes it |
 
 **Rollable Buffs** lists every buff that can be rolled, grouped by family and by
-class, with its icon and real description. Everything is on by default; switch
-anything off and it stops appearing in buff choices for good.
+class, with its icon and real description. Almost everything is on by default;
+switch anything off and it stops appearing in buff choices for good. A few are
+off to begin with and shown as such — switch one on and it joins the pool.
 
 ## Bots
 
@@ -104,7 +105,10 @@ win or a loss, for exercising the chain without playing a whole map.
 `scripts/mods/ChaosWastesAtHome/custom_buffs.lua` adds nine buffs of its own, in
 their own **Custom** category so you can weight or disable them as a group:
 
-- **Wrath Unbound** — a flat damage increase (a plain stat buff)
+- **Wrath Unbound** — a flat damage increase (a plain stat buff). **Off by
+  default**: it was written to prove the registration path worked, and a blanket
+  damage multiplier is not what the run is meant to be about. Turn it on in
+  **Rollable Buffs** if you want it
 - **Bulwark** — toughness on elite kills (a proc buff)
 - **Building Fury** — crit chance ramps on every non-crit, resets when you crit
 - **Relentless** — attack speed ramps per hit, resets after 2 seconds idle

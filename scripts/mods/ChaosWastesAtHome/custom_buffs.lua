@@ -106,6 +106,9 @@ local ICON_ROOT = "content/ui/textures/icons/buffs/hud/horde_buffs/small_buffs/"
 --   values        optional array substituted into the description's %s slots,
 --                 in order. Numbers belong to the code; wording belongs to the
 --                 localization file, and this is the seam between them
+--   default_off   true = registered and listed in the Rollable Buffs menu, but
+--                 not rolled unless the player switches it on. For buffs that
+--                 exist but are not part of the intended experience
 --   stat_buffs    shorthand for a plain passive buff
 --   template      factory returning the full template, for anything else. Given
 --                 a factory, `stat_buffs` is ignored -- put them in the table
@@ -148,6 +151,13 @@ local DAMAGE_MULTIPLIER = 1.15
 _add({
 	id = "cwah_custom_damage",
 	pool = true,
+	-- Off unless the player asks for it. A flat damage multiplier was the first
+	-- thing built here to prove the registration path worked, and it stayed
+	-- because it was already written -- but "everything hits harder" is exactly
+	-- the kind of buff a run built around card picks does not want. Kept rather
+	-- than deleted because it is still the clearest worked example of the plain
+	-- stat-buff shape, and someone may want it.
+	default_off = true,
 	icon = "hordes_buff_damage_increase",
 	values = { _pct(DAMAGE_MULTIPLIER - 1) },
 	stat_buffs = {
@@ -1323,6 +1333,19 @@ custom_buffs.register = function ()
 			end
 		end
 	end
+
+	-- Published on `mod` rather than exported, because buff_pool needs it and
+	-- loading this module from there would give it a second copy of everything
+	-- (io_dofile does not cache). Same channel as the proc counters.
+	local default_off = {}
+
+	for _, entry in ipairs(CATALOGUE) do
+		if entry.pool and entry.default_off then
+			default_off[entry.id] = true
+		end
+	end
+
+	mod._default_off_buffs = default_off
 
 	custom_buffs.register_network_lookup()
 
