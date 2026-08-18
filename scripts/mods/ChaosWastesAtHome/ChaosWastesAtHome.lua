@@ -438,7 +438,8 @@ end)
 -- The card UI is registered for every in_mission session and its package is
 -- loaded at UIManager init, so the only thing keeping it off screen here is
 -- this game-mode check. Everything below it is driven by generic events.
--- Holds the choice countdown while the world is paused.
+-- Holds the choice card's timers while the world is paused or before the
+-- card is on screen.
 --
 -- The card's timer is not gameplay time. StateGame feeds Managers.ui the raw
 -- frame dt rather than the gameplay timer -- which is exactly what makes the
@@ -467,13 +468,15 @@ end)
 -- _buffs_timer after _handle_choice_resolution had cleared it would leave the
 -- card unable to close.
 --
--- With "Pause while choosing" off, none of this runs and the stock 30-second
--- auto-pick behaves exactly as before.
+-- With "Pause while choosing" off the pause never engages, but the timers
+-- are still held while the card is off screen; once it appears the stock
+-- 30-second auto-pick behaves exactly as before.
 mod:hook(ConstantElementMissionBuffs, "_update_timers_state", function (func, self, dt, ui_renderer)
 	local context = self._context
-	local unresolved = pause.is_paused() and context and context.is_choice and not context.buff_chosen
-	local held_texts = unresolved and self._texts_timer
-	local held_buffs = unresolved and self._buffs_timer
+	local unresolved = context and context.is_choice and not context.buff_chosen
+	local hold = unresolved and (pause.is_paused() or not self:should_draw())
+	local held_texts = hold and self._texts_timer
+	local held_buffs = hold and self._buffs_timer
 
 	func(self, dt, ui_renderer)
 
