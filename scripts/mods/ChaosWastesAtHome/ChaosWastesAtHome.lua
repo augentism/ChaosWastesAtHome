@@ -513,15 +513,39 @@ end
 -- Tertium4Or5 hooks this same class. DMF resolves the name when the class
 -- exists, so nothing is executed early during boot -- the failure mode that
 -- poisoned minion_buff_extension for the whole session.
-mod:hook("PlayerUnitSpawnManager", "_handle_initial_bot_spawning", function (func, self, ...)
+-- BOTH spawn paths, and both clear the queue rather than just declining to run.
+--
+-- _queued_bots_n is the count of bots the game still wants, filled by
+-- _validate_bot_backfill from _num_available_bot_slots. _handle_initial_bot_spawning
+-- drains it at mission start; _handle_bot_spawning drains it one per frame from
+-- PlayerUnitSpawnManager.update (player_unit_spawn_manager.lua:85).
+--
+-- Skipping the initial call alone -- which is what this did at first -- suppressed
+-- nothing. The counter was left untouched, so the per-frame path spawned exactly
+-- the same bots a frame later, and the only visible effect was that they arrived
+-- slightly late. Zeroing the queue is what actually stops them, and doing it in
+-- the per-frame hook as well means a mid-mission re-validation (a client joining
+-- or leaving re-runs _validate_bot_backfill) cannot quietly refill it.
+--
+-- Still at the spawn functions rather than at _num_available_bot_slots:
+-- Tertium4Or5 hooks that one and returns func(...) + 3, so a 0 from us would come
+-- back out as 3. Discarding the queue is order-independent.
+local function _suppress_bot_spawning(func, self, ...)
 	if solo.should_suppress_bots() then
-		mod:debug_log("solo run - skipping initial bot spawning")
+		if (self._queued_bots_n or 0) > 0 then
+			mod:debug_log("solo run - discarding %d queued bot(s)", self._queued_bots_n)
+		end
+
+		self._queued_bots_n = 0
 
 		return
 	end
 
 	return func(self, ...)
-end)
+end
+
+mod:hook("PlayerUnitSpawnManager", "_handle_initial_bot_spawning", _suppress_bot_spawning)
+mod:hook("PlayerUnitSpawnManager", "_handle_bot_spawning", _suppress_bot_spawning)
 
 -- ---------------------------------------------------------------------------
 -- Collected buffs screen
