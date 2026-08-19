@@ -124,7 +124,7 @@ their own **Custom** category so you can weight or disable them as a group:
   Shotguns are left alone; they already do this
 
 The file is commented as a worked example of each shape. To add your own, see
-**[docs/adding-custom-buffs.md](docs/adding-custom-buffs.md)** — the five
+**[docs/adding-custom-buffs.md](https://github.com/augentism/ChaosWastesAtHome/blob/master/docs/adding-custom-buffs.md)** — the five
 registrations a buff needs, the buff shapes, and an index of every failure mode
 encountered building these, including the two that crash only when a buff is
 *applied* rather than offered and the one that quietly grinds the frame rate to
