@@ -15,7 +15,7 @@ local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHom
 -- one, each row a toggle. Everything is on by default; turning a row off adds
 -- it to the exclusion table the buff system already filters both pools through.
 --
--- Follows the priority-preset view in darktide-lua-gambits: offscreen renderer
+-- Follows the priority-preset view in AugsGamingChair: offscreen renderer
 -- plus UIWidgetGrid plus a mask, which is the workspace's pattern for a
 -- scrollable list in a custom view.
 

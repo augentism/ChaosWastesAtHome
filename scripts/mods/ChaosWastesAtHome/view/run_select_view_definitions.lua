@@ -75,14 +75,27 @@ local function _option_widget(scenegraph_id)
 				style.color[3] = hotspot.is_selected and 30 or 8
 			end,
 		},
-		-- The artwork is a material value on the mission board's grid-effect
-		-- material, not the texture this pass draws. Handing it the map path as
-		-- `value` renders a blank square.
+		-- The artwork is a material value (texture_map), not the texture this pass
+		-- draws. Handing the map path in as `value` renders a blank square.
+		--
+		-- The material is the engine's stock ui_default_base, NOT the mission
+		-- board's texture_with_grid_effect that the real board uses. The grid one
+		-- ships in packages/ui/views/mission_board_view, which is preloaded in the
+		-- hub and NOT resident anywhere else -- so drawing with it worked in the
+		-- launcher and hard-crashed the end-of-mission picker:
+		--
+		--   ui_renderer.lua:234: Error loading material '0'. Reason: 'Material
+		--   '#ID[...]' not found.'
+		--
+		-- create_material throws from inside the draw, so there is nothing to
+		-- pcall and no way to feature-test first. Depending on a package someone
+		-- else preloads is the bug; ui_default_base is always resident and takes
+		-- the same texture_map slot. Cost is the grid overlay.
 		{
 			pass_type = "texture",
 			style_id = "preview",
 			value_id = "preview",
-			value = "content/ui/materials/mission_board/texture_with_grid_effect",
+			value = "content/ui/materials/base/ui_default_base",
 			style = {
 				horizontal_alignment = "left",
 				vertical_alignment = "center",
