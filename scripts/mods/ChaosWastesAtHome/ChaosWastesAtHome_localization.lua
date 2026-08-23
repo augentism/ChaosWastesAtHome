@@ -651,6 +651,12 @@ return {
 	-- %s slots are filled from the mod's own tuning constants at load, in the
 	-- order they appear -- keep them in the same order when translating, and
 	-- write a literal per-cent as %%%%.
+	ignore_buff_family = {
+		en = "Ignore buff families",
+	},
+	ignore_buff_family_description = {
+		en = "You still choose a family and still get its opening buff, but the small buffs you earn afterwards are drawn from every family instead of only the one you picked - about seventy of them rather than ten. Buffs switched off in Rollable Buffs stay off.",
+	},
 	loc_cwah_custom_damage_title = {
 		en = "Wrath Unbound",
 	},

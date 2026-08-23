@@ -272,43 +272,71 @@ end
 -- circumstance templates are folded into the global CircumstanceTemplates and
 -- each carries a ui.display_name loc key; anything without one falls back to
 -- its raw id, which is still more use than showing nothing.
-difficulty.describe_circumstances = function (circumstances)
+-- Shared by the name and description lookups, which differ only in which ui
+-- field they read and what they do with a missing one.
+--
+-- Fading Light is on every Havoc mission at a rank-determined tier, so listing
+-- it on all three cards tells you nothing about which to pick.
+local function _circumstance_ui_strings(circumstances, field, fallback_to_id)
 	if not circumstances or #circumstances == 0 then
 		return nil
 	end
 
-	local names = {}
-
-	-- Fading Light is on every Havoc mission at a rank-determined tier, so
-	-- listing it on all three cards tells you nothing about which to pick.
 	local skip = {
 		[FADING_LIGHT[1]] = true,
 		[FADING_LIGHT[2]] = true,
 	}
 
+	local out = {}
+
 	for _, id in ipairs(circumstances) do
 		if not skip[id] then
 			local template = CircumstanceTemplates[id]
-			local loc_key = template and template.ui and template.ui.display_name
-			local label = id
+			local loc_key = template and template.ui and template.ui[field]
+			local text = fallback_to_id and id or nil
 
 			if loc_key then
 				local ok, localized = pcall(Localize, loc_key)
 
+				-- Localize hands back "<loc_key>" for a miss rather than failing,
+				-- so the marker has to be tested for explicitly.
 				if ok and localized and localized ~= "" and not string.starts_with(localized, "<") then
-					label = localized
+					text = localized
 				end
 			end
 
-			names[#names + 1] = label
+			if text then
+				out[#out + 1] = text
+			end
 		end
 	end
 
-	if #names == 0 then
+	if #out == 0 then
 		return nil
 	end
 
-	return table.concat(names, ", ")
+	return out
+end
+
+-- What each modifier actually does, one per line.
+--
+-- Separate from the names rather than appended to them so the card can style
+-- the two differently -- these run to a couple of hundred characters and would
+-- swamp the names at the same size and colour.
+--
+-- Unlike the names there is no fallback to the raw id: a circumstance with no
+-- description simply contributes nothing, because "high_flash_mission_07" as a
+-- description line is worse than an absent one.
+difficulty.describe_circumstance_details = function (circumstances)
+	local details = _circumstance_ui_strings(circumstances, "description", false)
+
+	return details and table.concat(details, "\n") or nil
+end
+
+difficulty.describe_circumstances = function (circumstances)
+	local names = _circumstance_ui_strings(circumstances, "display_name", true)
+
+	return names and table.concat(names, ", ") or nil
 end
 
 difficulty.describe = function (params)

@@ -8,6 +8,10 @@ mod.version = "0.4.1"
 -- them in and hands back the class table to hook directly.
 local MatchmakingConstants = require("scripts/settings/network/matchmaking_constants")
 local HordeMissionBuffsManager = require("scripts/managers/mission_buffs/horde_mission_buffs_manager")
+-- Safe at file scope: horde_mission_buffs_manager above requires both of these,
+-- so by the time we ask they are already in package.loaded.
+local MissionBuffsHandler = require("scripts/managers/mission_buffs/mission_buffs_handler")
+local MissionBuffsAllowedBuffs = require("scripts/managers/mission_buffs/mission_buffs_allowed_buffs")
 local GameModeCoopCompleteObjective = require("scripts/managers/game_mode/game_modes/game_mode_coop_complete_objective")
 local ConstantElementMissionBuffs = require("scripts/ui/constant_elements/elements/mission_buffs/constant_element_mission_buffs")
 local HOST_TYPES = MatchmakingConstants.HOST_TYPES
@@ -298,6 +302,75 @@ local function _resolved_abilities(player)
 
 	return { grenade = grenade, combat = combat }
 end
+
+-- "Ignore buff families": earn from every family's pool, not just the one picked.
+--
+-- A family normally locks the run to its own ~10 small buffs, putting the other
+-- six families' ~60 permanently out of reach. This is the one place that
+-- decides: set_buff_family_for_player is handed the chosen family's priority and
+-- regular lists, and persistent_data copies them into the player's available
+-- pools (mission_buffs_persistent_data.lua). Substituting the regular list here
+-- is the whole feature.
+--
+-- Family buffs are NOT archetype-filtered -- nothing in that path looks at the
+-- player's class, so merging them is safe. Class restriction only applies to
+-- LEGENDARY buffs, which are keyed to the blitz and combat ability you actually
+-- have equipped; those are untouched, and a Veteran will not start being offered
+-- Psyker ability buffs that would do nothing.
+--
+-- The priority list is left alone, so the family you pick still decides the buff
+-- you get immediately. The other families' priority buffs are folded into the
+-- regular pool instead of being granted -- otherwise they would be the only
+-- seven buffs in the game still unreachable with the option on.
+--
+-- Nothing here needs to re-apply the Rollable Buffs toggles: the handler passes
+-- buffs_to_exclude down and persistent_data filters against it, so a merged pool
+-- is filtered exactly like an unmerged one.
+mod:hook(MissionBuffsHandler, "set_buff_family_for_player", function (func, self, player, family_name, priority_family_buffs, family_buffs, from_choice)
+	if not mod.manager or not mod:get("ignore_buff_family") then
+		return func(self, player, family_name, priority_family_buffs, family_buffs, from_choice)
+	end
+
+	local families = MissionBuffsAllowedBuffs.buff_families
+
+	if type(families) ~= "table" then
+		mod:error("buff_families is missing - families cannot be merged")
+
+		return func(self, player, family_name, priority_family_buffs, family_buffs, from_choice)
+	end
+
+	local merged, seen = {}, {}
+
+	local function _take(list)
+		if type(list) ~= "table" then
+			return
+		end
+
+		for i = 1, #list do
+			local name = list[i]
+
+			if not seen[name] then
+				seen[name] = true
+				merged[#merged + 1] = name
+			end
+		end
+	end
+
+	-- The chosen family first, so its buffs keep the ordering they had.
+	_take(family_buffs)
+
+	for name, build in pairs(families) do
+		if name ~= family_name then
+			_take(build.buffs)
+			_take(build.priority_buffs)
+		end
+	end
+
+	mod:info("ignoring buff families: pool widened from %d to %d small buff(s)",
+		type(family_buffs) == "table" and #family_buffs or 0, #merged)
+
+	return func(self, player, family_name, priority_family_buffs, merged, from_choice)
+end)
 
 mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self, player, is_respawn)
 	if mod.manager ~= self or not player then

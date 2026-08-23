@@ -91,6 +91,7 @@ Everything is in the mod options menu.
 | Ramp difficulty each mission | on | Off keeps the run at its starting difficulty |
 | Load Mortis assets | on | Needed for buff icons and effects; ~0.5s warm, ~3s on the first load after launching the game, once per run |
 | Extra seconds on the end screen | 30 | Solo end screens are very short by default |
+| Ignore buff families | off | Small buffs come from **every** family, not just the one you picked — ~70 instead of ~10. You still choose a family and still get its opening buff |
 | Custom buff frequency | 1 | How often the mod's own buffs come up, relative to the shipped categories |
 | Havoc theme circumstance chance | 50% | Hunting grounds / ventilation purge / toxic gas |
 | Buffs per mission | 3 legendary, 7 family | Per mission, not per run — deep runs stack up fast |

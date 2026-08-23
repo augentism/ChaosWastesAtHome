@@ -193,6 +193,7 @@ LaunchView._refresh_cards = function (self)
 		if option then
 			widget.content.title = chain.mission_display_name(option.mission_name)
 			widget.content.modifiers = option.modifiers_label or ""
+			widget.content.modifier_detail = option.modifiers_detail or ""
 			widget.content.hotspot.is_selected = i == self._selected_index
 
 			self:_set_preview(widget, chain.mission_preview_texture(option.mission_name))

@@ -27,6 +27,12 @@ RunSelectView.on_enter = function (self)
 
 	local widgets_by_name = self._widgets_by_name
 
+	-- Hidden until update decides otherwise, so there is no chance of an empty
+	-- box on the frame between entering and the first refresh.
+	if widgets_by_name.detail then
+		widgets_by_name.detail.visible = false
+	end
+
 	widgets_by_name.title.content.text = mod:localize("picker_title")
 	widgets_by_name.subtitle.content.text = mod:localize("picker_subtitle")
 
@@ -114,7 +120,57 @@ RunSelectView._cb_option_pressed = function (self, index)
 	mod:info("next mission selected: %s", tostring(option.mission_name))
 end
 
+-- The hover detail, refreshed every frame from whichever card the cursor is on.
+--
+-- Polled rather than driven by hover callbacks: the hotspot pass already tracks
+-- is_hover for its own highlight, so reading it needs no extra wiring and cannot
+-- fall out of step with what the card looks like. Three comparisons a frame.
+--
+-- Falls back to the SELECTED card when nothing is hovered, so the panel is
+-- populated the moment the view opens rather than only once the player happens
+-- to move the mouse over something.
+RunSelectView._refresh_detail = function (self)
+	local widget = self._widgets_by_name.detail
+
+	if not widget then
+		return
+	end
+
+	local index
+
+	for i = 1, definitions.num_options do
+		local option_widget = self._widgets_by_name["option_" .. i]
+		local hotspot = option_widget and option_widget.visible and option_widget.content.hotspot
+
+		if hotspot and hotspot.is_hover then
+			index = i
+
+			break
+		end
+	end
+
+	index = index or self._selected_index
+
+	local option = index and self._options[index]
+	local detail = option and option.modifiers_detail
+
+	-- Nothing worth reading is worse than an empty box: a mission with no
+	-- maelstrom has no description, so the panel hides rather than showing a
+	-- heading over blank space.
+	if not option or not detail or detail == "" then
+		widget.visible = false
+
+		return
+	end
+
+	widget.content.heading = option.modifiers_label or ""
+	widget.content.body = detail
+	widget.visible = true
+end
+
 RunSelectView.update = function (self, dt, t, input_service)
+	self:_refresh_detail()
+
 	return RunSelectView.super.update(self, dt, t, input_service)
 end
 

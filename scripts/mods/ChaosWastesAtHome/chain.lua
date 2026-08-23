@@ -285,6 +285,7 @@ chain.roll_options = function (params, skip_ramp)
 				resistance = resistance,
 				havoc_data = havoc_data,
 				modifiers_label = difficulty.describe_circumstances(circumstances),
+				modifiers_detail = difficulty.describe_circumstance_details(circumstances),
 			}
 		else
 			-- A fresh maelstrom per option rather than carrying the played
@@ -299,6 +300,7 @@ chain.roll_options = function (params, skip_ramp)
 				resistance = target.resistance,
 				circumstance_name = maelstrom or params.circumstance_name or "default",
 				modifiers_label = maelstrom and difficulty.describe_circumstances({ maelstrom }) or nil,
+				modifiers_detail = maelstrom and difficulty.describe_circumstance_details({ maelstrom }) or nil,
 			}
 		end
 

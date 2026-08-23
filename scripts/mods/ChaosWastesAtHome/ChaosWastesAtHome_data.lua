@@ -86,6 +86,11 @@ return {
 				range         = { 0, 180 },
 			},
 			{
+				setting_id    = "ignore_buff_family",
+				type          = "checkbox",
+				default_value = false,
+			},
+			{
 				setting_id    = "custom_buff_weight",
 				type          = "numeric",
 				default_value = 1,

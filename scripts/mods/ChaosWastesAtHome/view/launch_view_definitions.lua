@@ -23,11 +23,22 @@ local PREVIEW_H = math.floor(CARD_W * 0.5)
 local TITLE_TOP = PREVIEW_H + 14
 local TITLE_H = 34
 local MODIFIERS_TOP = TITLE_TOP + TITLE_H + 8
--- Four wrapped lines at font size 15. A Havoc card lists two rolled modifiers
--- plus a theme circumstance, which is the longest case.
-local MODIFIERS_H = 88
+-- Two wrapped lines at font size 15. A Havoc card lists two rolled modifiers
+-- plus a theme circumstance, which is the longest case for the NAMES.
+local MODIFIERS_H = 44
+local DETAIL_TOP = MODIFIERS_TOP + MODIFIERS_H + 4
+
+-- What the modifiers actually do, and the reason the card grew.
+--
+-- These are the game's own circumstance descriptions and they are long: 37 to
+-- 221 characters, and a Havoc card can carry three of them. Sized for close to
+-- that worst case at font 13 in a 416px box -- roughly 60 characters a line, so
+-- twelve lines. Text that does not fit is drawn outside the card rather than
+-- clipped, which is how the modifier list escaped its box the first time, so
+-- this errs long deliberately.
+local DETAIL_H = 168
 local CARD_BOTTOM_PAD = 16
-local CARD_H = MODIFIERS_TOP + MODIFIERS_H + CARD_BOTTOM_PAD
+local CARD_H = DETAIL_TOP + DETAIL_H + CARD_BOTTOM_PAD
 
 local ROW_WIDTH = NUM_OPTIONS * CARD_W + (NUM_OPTIONS - 1) * CARD_SPACING
 local CARDS_TOP = 330
@@ -198,6 +209,23 @@ local function _option_widget(scenegraph_id)
 				offset = { 22, MODIFIERS_TOP, 4 },
 				size = { CARD_W - 44, MODIFIERS_H },
 				text_color = { 255, 150, 140, 120 },
+			},
+		},
+		-- Smaller and dimmer than the names above on purpose: at the same size
+		-- and colour a 200-character description buries the modifier it belongs
+		-- to, which is the thing you are actually choosing between.
+		{
+			pass_type = "text",
+			value_id = "modifier_detail",
+			style = {
+				font_type = "proxima_nova_medium",
+				font_size = 13,
+				text_horizontal_alignment = "left",
+				text_vertical_alignment = "top",
+				word_wrap = true,
+				offset = { 22, DETAIL_TOP, 4 },
+				size = { CARD_W - 44, DETAIL_H },
+				text_color = { 200, 120, 115, 100 },
 			},
 		},
 	}, scenegraph_id)
