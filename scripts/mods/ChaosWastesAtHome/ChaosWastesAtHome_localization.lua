@@ -143,6 +143,18 @@ return {
 		en = "Disable all shown",
 		ru = "Отключить все показанные",
 	},
+	-- Named for what the button DOES, not for the state it is in. The state
+	-- reads off the row itself -- an excluded family is dimmed in the list --
+	-- and a button labelled with a state gives no clue that it can be clicked.
+	family_pick_disable = {
+		en = "Disable starting pick",
+	},
+	family_pick_enable = {
+		en = "Enable starting pick",
+	},
+	family_pick_unavailable = {
+		en = "Select a family",
+	},
 	buff_reset_all = {
 		en = "Re-enable everything",
 		ru = "Включить всё заново",
@@ -256,8 +268,20 @@ return {
 		en = "How often buffs added by custom_buffs.lua come up in a legendary card pick, relative to the shipped categories (which sit around 1-5). 0 removes them entirely without deleting them.",
 		ru = "Как часто усиления из custom_buffs.lua появляются в легендарных картах, относительно стандартных категорий (у них вес около 1–5). 0 полностью исключает их, не удаляя сами усиления.",
 	},
+	starting_legendary_picks = {
+		en = "Starting card picks",
+	},
+	starting_legendary_picks_description = {
+		en = "Card picks handed out right after you choose your buff family, before the run's own triggers start. They come first, then the starting family buffs. These are extra: they do not count against the run's card pick limit, so the triggers still hand out their full allowance afterwards.",
+	},
+	starting_family_buffs = {
+		en = "Starting family buffs",
+	},
+	starting_family_buffs_description = {
+		en = "Family buffs granted right after the starting card picks. Extra, like the card picks: they do not count against the run's family buff limit.",
+	},
 	havoc_theme_chance = {
-		en = "Havoc theme circumstance chance (%%)",
+		en = "Environment chance",
 		ru = "Шанс тематического события Хавока (%%)",
 		["zh-cn"] = "浩劫专属场景概率(%%)",
 	},
@@ -454,7 +478,7 @@ return {
 		["zh-cn"] = "对局内固定周期触发奖励，完全稳定，但和玩家操作无关。",
 	},
 	time_interval = {
-		en = "Minutes between grants",
+		en = "Interval (minutes)",
 		ru = "Минуты между выдачами",
 		["zh-cn"] = "奖励间隔分钟",
 	},
@@ -656,6 +680,64 @@ return {
 	},
 	ignore_buff_family_description = {
 		en = "You still choose a family and still get its opening buff, but the small buffs you earn afterwards are drawn from every family instead of only the one you picked - about seventy of them rather than ten. Buffs switched off in Rollable Buffs stay off.",
+	},
+	-- Loadouts ---------------------------------------------------------------
+	tab_loadouts = {
+		en = "Loadouts",
+	},
+	tab_settings = {
+		en = "Settings",
+	},
+	settings_section_run = {
+		en = "The run",
+	},
+	settings_section_buffs = {
+		en = "Buffs",
+	},
+	settings_section_havoc = {
+		en = "Havoc",
+	},
+	settings_section_sources = {
+		en = "How buffs are earned",
+	},
+	settings_title = {
+		en = "Settings",
+	},
+	settings_on = {
+		en = "On",
+	},
+	settings_off = {
+		en = "Off",
+	},
+	loadout_change_icon = {
+		en = "Change icon",
+	},
+	loadout_title = {
+		en = "Loadouts",
+	},
+	loadout_subtitle = {
+		en = "Click a loadout to load it. Anything you change afterwards is saved to it automatically.",
+	},
+	loadout_empty = {
+		en = "No loadouts yet. Create one to save your current settings.",
+	},
+	loadout_unavailable = {
+		en = "Loadouts are unavailable: this session has no file access.",
+	},
+	loadout_create = {
+		en = "New loadout",
+	},
+	loadout_set_default = {
+		en = "Make default",
+	},
+	loadout_is_default = {
+		en = "default",
+	},
+	loadout_delete = {
+		en = "Delete",
+	},
+	loadout_delete_confirm = {
+		en = "Sure?",
 	},
 	loc_cwah_custom_damage_title = {
 		en = "Wrath Unbound",
