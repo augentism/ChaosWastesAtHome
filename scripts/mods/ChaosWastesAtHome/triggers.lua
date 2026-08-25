@@ -22,8 +22,19 @@ local LEGENDARY_WAVE_ROTATION = { 3, 6, 9 }
 
 local state
 
-triggers.reset = function ()
+-- first_mission is passed in rather than worked out here.
+--
+-- Only the starting hand cares, and it is a property of the RUN, not of the
+-- mission: everything else this resets is deliberately per-mission. The caller
+-- already holds the run module, so it decides once at mission start instead of
+-- this file reaching across for it every frame.
+--
+-- Defaults to false, so the file-scope call below and the teardown call do not
+-- arm a hand. A mod reload mid-mission therefore skips the hand for the rest of
+-- that mission, which is the right way round: by then it has already been dealt.
+triggers.reset = function (first_mission)
 	state = {
+		first_mission = first_mission == true,
 		kills = 0,
 		time_accum = 0,
 		family_granted = 0,
@@ -32,6 +43,11 @@ triggers.reset = function ()
 		prev_terror_events = 0,
 		family_requested = false,
 		repump_accum = 0,
+		starting_legendary_given = 0,
+		starting_family_given = 0,
+		starting_legendary_tried = 0,
+		starting_family_tried = 0,
+		starting_accum = 0,
 	}
 end
 
@@ -193,14 +209,22 @@ triggers.grant_named = function (buff_name)
 	return true
 end
 
-triggers.grant_family = function ()
+-- off_budget: a starting buff, which is extra rather than an advance on the
+-- run's allowance. It neither checks the budget nor consumes it.
+--
+-- family_granted still counts every one of them, because it is the honest total
+-- of what the player received and /cw_status reports it. The budget is measured
+-- against that total minus the ones that came free, so the run's own triggers
+-- still get their full allowance afterwards.
+triggers.grant_family = function (off_budget)
 	if not mod.manager then
 		return false
 	end
 
 	local budget = mod:get("max_family_buffs") or 0
 
-	if budget > 0 and state.family_granted >= budget then
+	if not off_budget and budget > 0
+		and state.family_granted - state.starting_family_given >= budget then
 		return false
 	end
 
@@ -222,19 +246,25 @@ triggers.grant_family = function ()
 
 	state.family_granted = state.family_granted + 1
 
+	if off_budget then
+		state.starting_family_given = state.starting_family_given + 1
+	end
+
 	mod:debug_log("granted family buff (%d)", state.family_granted)
 
 	return true
 end
 
-triggers.grant_legendary = function ()
+-- off_budget as above: a starting pick, extra rather than an advance.
+triggers.grant_legendary = function (off_budget)
 	if not mod.manager then
 		return false
 	end
 
 	local budget = mod:get("max_legendary_choices") or 0
 
-	if budget > 0 and state.legendary_granted >= budget then
+	if not off_budget and budget > 0
+		and state.legendary_granted - state.starting_legendary_given >= budget then
 		return false
 	end
 
@@ -254,6 +284,10 @@ triggers.grant_legendary = function ()
 	Managers.event:trigger("mission_buffs_event_request_legendary_buff_choice", wave_num, 3)
 
 	state.legendary_granted = state.legendary_granted + 1
+
+	if off_budget then
+		state.starting_legendary_given = state.starting_legendary_given + 1
+	end
 
 	mod:debug_log("granted legendary choice (%d) using wave weighting %d", state.legendary_granted, wave_num)
 
@@ -429,6 +463,78 @@ end
 -- downed, or a choice already up) and leaves them queued. Mortis re-pumps the
 -- queue at every wave boundary; we have no wave boundaries, so without this a
 -- buff earned while downed would never be presented.
+-- The opening hand: a burst of picks the moment the run is under way.
+--
+-- Handed out one at a time rather than all at once. Firing the whole burst in a
+-- single frame does queue -- the UI manager holds what it cannot show -- but
+-- grant_legendary's pool check reads a pool nothing has spent yet, so three
+-- requests can all pass a check only two can actually satisfy. Pacing them
+-- keeps every check honest, and gives the ordering the option describes:
+-- the card picks first, then the family buffs.
+--
+-- Two gates, because neither alone is enough. _choice_is_up covers the player
+-- deliberating over a card, but reads false in the frames between asking for a
+-- card and it appearing; the minimum gap covers that window, and is also what
+-- paces the family buffs, which grant outright and never put a card up.
+local STARTING_GRANT_GAP = 1.5
+
+local function _grant_starting_buffs(dt)
+	-- Once per run, not once per mission. triggers.reset runs at the start of
+	-- every mission in the chain -- that is what the per-mission budgets need --
+	-- so the burst's own counters were clear again each time and the hand was
+	-- being dealt at the top of every mission.
+	if not state.first_mission then
+		return
+	end
+
+	local want_legendary = mod:get("starting_legendary_picks") or 0
+	local want_family = mod:get("starting_family_buffs") or 0
+
+	-- Attempts, not grants. A refused pick still counts as attempted so it is
+	-- dropped rather than retried; the *given* counters are owned by the grant
+	-- functions and only move on success, which is what the budget maths needs.
+	if state.starting_legendary_tried >= want_legendary
+		and state.starting_family_tried >= want_family then
+		return
+	end
+
+	-- Nothing before the opening family choice is resolved: grant_family refuses
+	-- outright without a family, and a card offered over the family card would
+	-- only be queued behind it.
+	if not _has_family(_local_player()) then
+		return
+	end
+
+	state.starting_accum = state.starting_accum + dt
+
+	-- Falls back to the gap alone if the predicate is somehow not there yet:
+	-- treating "cannot tell" as "a card is up" would stall the burst forever.
+	local choice_up = mod.choice_is_up and mod.choice_is_up() or false
+
+	if state.starting_accum < STARTING_GRANT_GAP or choice_up then
+		return
+	end
+
+	state.starting_accum = 0
+
+	-- Counted whether or not the grant lands. The per-run budget or an exhausted
+	-- pool can refuse one, and retrying a refused pick every frame for the rest
+	-- of the mission is worse than dropping it: one attempt per configured pick.
+	if state.starting_legendary_tried < want_legendary then
+		state.starting_legendary_tried = state.starting_legendary_tried + 1
+
+		if triggers.grant_legendary(true) then
+			return
+		end
+	end
+
+	if state.starting_family_tried < want_family then
+		state.starting_family_tried = state.starting_family_tried + 1
+
+		triggers.grant_family(true)
+	end
+end
+
 local function _repump_notifications(dt)
 	state.repump_accum = state.repump_accum + dt
 
@@ -448,6 +554,7 @@ triggers.update = function (dt)
 
 	_request_family_choice()
 	_repump_notifications(dt)
+	_grant_starting_buffs(dt)
 
 	if mod:get("time_enabled") then
 		state.time_accum = state.time_accum + dt

@@ -1,5 +1,7 @@
 local mod = get_mod("ChaosWastesAtHome")
 
+local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+
 local ScriptWorld = require("scripts/foundation/utilities/script_world")
 local UIRenderer = require("scripts/managers/ui/ui_renderer")
 local UIWidget = require("scripts/managers/ui/ui_widget")
@@ -85,6 +87,10 @@ BuffToggleView.on_enter = function (self)
 		widgets_by_name.disable_all_button.content.hotspot.pressed_callback = callback(self, "cb_disable_all")
 	end
 
+	if widgets_by_name.family_pick_button then
+		widgets_by_name.family_pick_button.content.hotspot.pressed_callback = callback(self, "cb_toggle_family_pick")
+	end
+
 	if widgets_by_name.reset_all_button then
 		widgets_by_name.reset_all_button.content.hotspot.pressed_callback = callback(self, "cb_reset_all")
 	end
@@ -96,6 +102,9 @@ BuffToggleView.on_enter = function (self)
 	-- Only the other tab does anything; this screen's own tab is inert.
 	if widgets_by_name.tab_start then
 		widgets_by_name.tab_start.content.hotspot.pressed_callback = callback(self, "cb_tab_start")
+	widgets_by_name.tab_settings.content.hotspot.pressed_callback = callback(self, "cb_tab_settings")
+
+	strip.attach(self)
 	end
 
 	-- The icons live in the Mortis package, which is only resident during one of
@@ -156,6 +165,10 @@ end
 
 -- The "7/9" on a filter row, so a group with things switched off is visible
 -- without opening it.
+--
+-- A family that can no longer be offered as an opening pick is dimmed as well,
+-- so which ones are excluded reads down the column instead of having to be
+-- discovered by selecting each one in turn.
 BuffToggleView._refresh_group_row = function (self, widget, group)
 	local on, total = buff_pool.group_counts(group)
 
@@ -163,6 +176,53 @@ BuffToggleView._refresh_group_row = function (self, widget, group)
 	widget.style.state_text.text_color = table.clone(
 		on == total and self._blueprint_data.color_on or self._blueprint_data.color_off
 	)
+
+	local excluded = group.family ~= nil and not buff_pool.is_family_offered(group.family)
+
+	widget.style.text.text_color = table.clone(
+		excluded and self._blueprint_data.color_off or self._blueprint_data.color_title
+	)
+end
+
+-- Reads the selected family, so it updates on every selection as well as on
+-- every toggle.
+BuffToggleView._refresh_family_pick_button = function (self)
+	local widget = self._widgets_by_name.family_pick_button
+
+	if not widget then
+		return
+	end
+
+	local group = self._selected_group
+	local family = group and group.family
+
+	widget.content.hotspot.disabled = family == nil
+
+	if not family then
+		-- The custom-buff group is not a family and has no opening pick, so the
+		-- button says what it would act on rather than going blank.
+		widget.content.original_text = mod:localize("family_pick_unavailable")
+
+		return
+	end
+
+	widget.content.original_text = buff_pool.is_family_offered(family)
+		and mod:localize("family_pick_disable")
+		or mod:localize("family_pick_enable")
+end
+
+BuffToggleView.cb_toggle_family_pick = function (self)
+	local group = self._selected_group
+	local family = group and group.family
+
+	if not family then
+		return
+	end
+
+	buff_pool.set_family_offered(family, not buff_pool.is_family_offered(family))
+
+	self:_refresh_family_pick_button()
+	self:_refresh_group_counts()
 end
 
 -- ---------------------------------------------------------------------------
@@ -257,6 +317,10 @@ BuffToggleView._select_group = function (self, group)
 	-- something to describe, and a blank right-hand third reads as broken.
 	self:_select_buff(group and group.names[1] or nil)
 	self:_refresh_summary()
+
+	-- Here rather than in the click handler: on_enter selects the first group
+	-- directly, and the button would start out describing nothing.
+	self:_refresh_family_pick_button()
 end
 
 -- ---------------------------------------------------------------------------
@@ -407,11 +471,19 @@ end
 BuffToggleView.cb_reset_all = function (self)
 	for _, group in ipairs(buff_pool.groups()) do
 		buff_pool.set_group_enabled(group, true)
+
+		-- Families too. "Re-enable everything" that leaves four families barred
+		-- from the opening pick has not re-enabled everything, and the state it
+		-- misses is the one that is hardest to spot.
+		if group.family then
+			buff_pool.set_family_offered(group.family, true)
+		end
 	end
 
 	self:_refresh_visible_buffs()
 	self:_refresh_group_counts()
 	self:_refresh_summary()
+	self:_refresh_family_pick_button()
 end
 
 -- Every group row, not just the selected one: the same buff can appear in more
@@ -432,6 +504,49 @@ BuffToggleView.cb_tab_start = function (self)
 	Managers.ui:open_view("chaos_wastes_launch_view")
 end
 
+BuffToggleView.cb_tab_settings = function (self)
+	Managers.ui:close_view(VIEW_NAME)
+	Managers.ui:open_view("chaos_wastes_settings_view")
+end
+
+-- The strip applied a different loadout, so anything this tab reads from
+-- settings is now stale.
+BuffToggleView.on_loadout_changed = function (self)
+	-- Refreshed in place. NOT rebuilt.
+	--
+	-- _build_groups is an on_enter builder: it appends into _group_widgets and
+	-- registers a widget name per row, so calling it again left two rows per
+	-- group in the grid and two widgets claiming one name. That is the duplicate
+	-- that appeared in the scroll list on every loadout click, and why clicking a
+	-- row afterwards acted on something other than what it looked like.
+	--
+	-- Nothing needs rebuilding anyway. _build_catalogue reads
+	-- MissionBuffsAllowedBuffs and the custom buff list and never touches a
+	-- setting, so a different loadout changes which buffs are ticked, never
+	-- which groups or rows exist. Only the counts move.
+	-- By id, not by table identity: select() invalidates the catalogue, so these
+	-- are fresh group tables holding the same ids -- which also means the group
+	-- the view has open is now a table from the previous build. Re-point it
+	-- rather than leaving a stale reference behind.
+	local selected_id = self._selected_group and self._selected_group.id
+
+	for _, group in ipairs(buff_pool.groups()) do
+		local widget = self._group_rows_by_id[group.id]
+
+		if widget then
+			self:_refresh_group_row(widget, group)
+		end
+
+		if group.id == selected_id then
+			self._selected_group = group
+		end
+	end
+
+	self:_refresh_visible_buffs()
+	self:_refresh_summary()
+	self:_refresh_family_pick_button()
+end
+
 BuffToggleView.cb_on_back_pressed = function (self)
 	Managers.ui:close_view(VIEW_NAME)
 end
@@ -441,6 +556,8 @@ end
 -- ---------------------------------------------------------------------------
 
 BuffToggleView.update = function (self, dt, t, input_service)
+	strip.update(self, dt)
+
 	if self._group_grid then
 		self._group_grid:update(dt, t, input_service)
 	end

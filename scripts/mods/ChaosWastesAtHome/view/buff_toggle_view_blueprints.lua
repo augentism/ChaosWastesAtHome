@@ -134,4 +134,7 @@ return settings("ChaosWastesBuffToggleViewBlueprints", {
 	row_height = ROW_H,
 	color_on = COLOR_ON,
 	color_off = COLOR_OFF,
+	-- What a row title is normally drawn in, so a row that dims itself has
+	-- something to go back to without hardcoding the engine's colour.
+	color_title = UIFontSettings.list_button.text_color,
 })

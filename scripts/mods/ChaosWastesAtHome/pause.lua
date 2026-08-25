@@ -62,6 +62,14 @@ local function _choice_is_up()
 	return element:should_draw()
 end
 
+-- Parked on the mod table rather than exported for a caller to io_dofile.
+--
+-- io_dofile re-executes the file on every call, so another module asking for
+-- this file would get a second pause instance -- harmless here only because the
+-- state lives on mod._pause_state, and exactly the duplicate-module shape that
+-- has already caused one crash in this mod. One instance, reached by name.
+mod.choice_is_up = _choice_is_up
+
 local function _is_server()
 	local game_session = Managers.state and Managers.state.game_session
 

@@ -87,6 +87,10 @@ local function _build_catalogue()
 		if family then
 			local group = _new_group("family_" .. family_id, family.name or family_id)
 
+			-- The raw id, so callers do not have to unpick it out of group.id.
+			-- Only family groups carry one; the custom-buff group has no family.
+			group.family = family_id
+
 			for _, name in ipairs(family.priority_buffs or {}) do
 				_add(group, name)
 			end
@@ -307,11 +311,69 @@ local function _apply(names, enabled)
 		explicit[name] = enabled or nil
 	end
 
-	mod:set(SETTING_ID, disabled, false)
-	mod:set(ENABLED_SETTING_ID, explicit, false)
+	-- notify TRUE, and that is what persists a buff choice into the selected
+	-- loadout. on_setting_changed is the only thing that marks the loadout
+	-- dirty, so with notify false the ticks changed on screen, changed in DMF's
+	-- settings, and were never written to the loadout file -- the buff pool was
+	-- the one part of the config that silently did not save.
+	--
+	-- Two notifies rather than one because either table on its own is an
+	-- incomplete picture; the debounced writer collapses them into a single
+	-- file write regardless.
+	mod:set(SETTING_ID, disabled, true)
+	mod:set(ENABLED_SETTING_ID, explicit, true)
 end
 
 local ONE = {}
+
+-- ---------------------------------------------------------------------------
+-- Which families may be offered as the opening pick
+-- ---------------------------------------------------------------------------
+
+-- Stored the same way as the buff toggles, for the same reason: only the
+-- families the player has switched OFF are written, so a family added by a
+-- later patch arrives offered rather than silently missing.
+local FAMILY_SETTING_ID = "disabled_families"
+
+local function _disabled_families()
+	local stored = mod:get(FAMILY_SETTING_ID)
+
+	return type(stored) == "table" and stored or {}
+end
+
+buff_pool.FAMILY_SETTING_ID = FAMILY_SETTING_ID
+
+buff_pool.is_family_offered = function (family)
+	return not _disabled_families()[family]
+end
+
+buff_pool.set_family_offered = function (family, offered)
+	local disabled = _disabled_families()
+
+	disabled[family] = not offered or nil
+
+	-- notify TRUE, or the change never reaches the selected loadout. The buff
+	-- toggles shipped with this wrong and did not persist at all.
+	mod:set(FAMILY_SETTING_ID, disabled, true)
+end
+
+-- The families still eligible for the opening choice, in the game's own order.
+buff_pool.offered_families = function ()
+	local disabled = _disabled_families()
+	local out = {}
+
+	for _, family in ipairs(MissionBuffsAllowedBuffs.available_family_builds or {}) do
+		if not disabled[family] then
+			out[#out + 1] = family
+		end
+	end
+
+	return out
+end
+
+buff_pool.family_count = function ()
+	return #(MissionBuffsAllowedBuffs.available_family_builds or {})
+end
 
 buff_pool.set_enabled = function (name, enabled)
 	ONE[1] = name

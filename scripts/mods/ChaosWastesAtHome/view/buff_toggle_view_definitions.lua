@@ -6,6 +6,8 @@ local UIFontSettings = require("scripts/managers/ui/ui_font_settings")
 local UIWidget = require("scripts/managers/ui/ui_widget")
 local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 
+local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+
 local _s = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buff_toggle_view_settings")
 
 local scrollbar_width = _s.scrollbar_width
@@ -32,7 +34,7 @@ local scenegraph_definition = {
 		parent = "screen",
 		horizontal_alignment = "center",
 		size = { 280, 40 },
-		position = { -145, 84, 3 },
+		position = { -290, 84, 3 },
 	},
 
 	tab_buffs = {
@@ -40,7 +42,15 @@ local scenegraph_definition = {
 		parent = "screen",
 		horizontal_alignment = "center",
 		size = { 280, 40 },
-		position = { 145, 84, 3 },
+		position = { 0, 84, 3 },
+	},
+
+	tab_settings = {
+		vertical_alignment = "top",
+		parent = "screen",
+		horizontal_alignment = "center",
+		size = { 280, 40 },
+		position = { 290, 84, 3 },
 	},
 
 	title_divider = {
@@ -224,6 +234,16 @@ local scenegraph_definition = {
 		size = { group_grid_size[1], BUTTON_H },
 		position = { GROUP_X, PANEL_TOP + group_grid_size[2] + 12, 2 },
 	},
+
+	-- Acts on the selected family, so it lives under the family list rather than
+	-- under the buff list.
+	family_pick_button = {
+		vertical_alignment = "top",
+		parent = "screen",
+		horizontal_alignment = "left",
+		size = { group_grid_size[1], BUTTON_H },
+		position = { GROUP_X, PANEL_TOP + group_grid_size[2] + 12 + BUTTON_H + 10, 2 },
+	},
 }
 
 local widget_definitions = {
@@ -393,6 +413,11 @@ local widget_definitions = {
 		{ original_text = mod:localize("tab_rollable_buffs") }
 	),
 
+	tab_settings = UIWidget.create_definition(
+		table.clone(ButtonPassTemplates.default_button), "tab_settings",
+		{ original_text = mod:localize("tab_settings") }
+	),
+
 	-- default_button reads its label from original_text, not text: a
 	-- change_function overwrites content.text every frame.
 	enable_all_button = UIWidget.create_definition(
@@ -409,6 +434,11 @@ local widget_definitions = {
 		table.clone(ButtonPassTemplates.default_button), "reset_all_button",
 		{ original_text = mod:localize("buff_reset_all") }
 	),
+
+	family_pick_button = UIWidget.create_definition(
+		table.clone(ButtonPassTemplates.default_button), "family_pick_button",
+		{ original_text = "" }
+	),
 }
 
 local legend_inputs = {
@@ -419,6 +449,8 @@ local legend_inputs = {
 		alignment = "left_alignment",
 	},
 }
+
+strip.extend(scenegraph_definition, widget_definitions)
 
 return settings("ChaosWastesBuffToggleViewDefinitions", {
 	legend_inputs = legend_inputs,
