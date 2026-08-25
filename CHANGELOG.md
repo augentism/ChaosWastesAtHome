@@ -15,6 +15,14 @@
   to change it. The `+` under the list creates a loadout from your current
   configuration.
 
+### Buff selection
+
+- **Disable an archetype from the opening pick.** In Rollable Buffs, select a
+  family and use the button under the list to keep it out of the three offered
+  at the start of a run. Excluded families are dimmed in the list, and the
+  setting is saved per loadout. Switching every family off falls back to
+  offering all of them rather than leaving you with no card.
+
 ### Settings
 
 - **New Settings tab**, alongside Start a Crusade and Rollable Buffs. Everything
@@ -25,16 +33,3 @@
   hand: a configurable number of legendary card picks, then family buffs, handed
   out once you have chosen your buff family. These are extra and do not count
   against the run's own limits.
-- **Ignore buff families.** Offers buffs from every family rather than only the
-  one you opened with. Buffs normally locked behind another class are included.
-
-### Fixes
-
-- Buff pool changes were never written to disk. The whole rollable-buffs
-  selection is now saved.
-- Selecting a loadout could overwrite it with the settings of the one you were
-  on before, eventually making every loadout identical.
-- Selecting a loadout duplicated every row in the Rollable Buffs list.
-- Changing a loadout's icon did nothing on some tabs, and a click meant for the
-  icon palette also fell through to the setting or buff row underneath it.
-- Long setting names wrapped on top of themselves in the Settings tab.
