@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "0.4.1"
+mod.version = "0.6.0"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -12,6 +12,7 @@ local HordeMissionBuffsManager = require("scripts/managers/mission_buffs/horde_m
 -- so by the time we ask they are already in package.loaded.
 local MissionBuffsHandler = require("scripts/managers/mission_buffs/mission_buffs_handler")
 local MissionBuffsAllowedBuffs = require("scripts/managers/mission_buffs/mission_buffs_allowed_buffs")
+local MissionBuffsSelector = require("scripts/managers/mission_buffs/mission_buffs_selector")
 local GameModeCoopCompleteObjective = require("scripts/managers/game_mode/game_modes/game_mode_coop_complete_objective")
 local ConstantElementMissionBuffs = require("scripts/ui/constant_elements/elements/mission_buffs/constant_element_mission_buffs")
 local HOST_TYPES = MatchmakingConstants.HOST_TYPES
@@ -33,7 +34,9 @@ local custom_buffs = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAt
 local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_pool")
 local escape = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/escape")
 local solo = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/solo")
+local loadouts = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/loadouts")
 
+local SETTINGS_VIEW = "chaos_wastes_settings_view"
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
 local BUFF_TOGGLE_VIEW = "chaos_wastes_buff_toggle_view"
 local LAUNCH_VIEW = "chaos_wastes_launch_view"
@@ -129,10 +132,343 @@ local function _warn_about_conflicts()
 	end
 end
 
+-- ---------------------------------------------------------------------------
+-- Loadouts
+-- ---------------------------------------------------------------------------
+
+-- Auto-save is debounced rather than written on the spot.
+--
+-- on_setting_changed fires once per setting, and the options menu fires a burst
+-- of them -- dragging a numeric slider is one call per step. Writing the file
+-- per call would mean hundreds of writes for one drag. A dirty flag plus a short
+-- delay in mod.update collapses that into one, the same shape as the pending
+-- pool init below.
+local LOADOUT_SAVE_DELAY = 1
+local loadout_dirty = false
+local loadout_save_accum = 0
+
+-- Suppressed while a loadout is being applied: apply() writes every setting, and
+-- each write would otherwise mark the file dirty and save it straight back.
+local applying_loadout = false
+
+local function _save_active_loadout()
+	local slug = mod:get(loadouts.ACTIVE_SETTING)
+
+	if not slug or slug == "" then
+		return
+	end
+
+	local existing = loadouts.read(slug)
+
+	-- Name and icon are read back and re-written rather than tracked in memory:
+	-- auto-save rewrites the whole file, so anything not carried forward here is
+	-- silently dropped the first time a setting changes.
+	loadouts.write(slug, {
+		name = existing and existing.name or slug,
+		icon = existing and existing.icon or nil,
+		settings = loadouts.snapshot(),
+	})
+end
+
+local function _mark_loadout_dirty()
+	if applying_loadout then
+		return
+	end
+
+	if not mod:get(loadouts.ACTIVE_SETTING) then
+		return
+	end
+
+	loadout_dirty = true
+	loadout_save_accum = 0
+end
+
+local function _update_loadout_save(dt)
+	if not loadout_dirty then
+		return
+	end
+
+	loadout_save_accum = loadout_save_accum + dt
+
+	if loadout_save_accum < LOADOUT_SAVE_DELAY then
+		return
+	end
+
+	loadout_dirty = false
+	loadout_save_accum = 0
+
+	_save_active_loadout()
+end
+
+-- Everything the loadout view needs, so the view never touches DMF settings or
+-- the filesystem directly.
+mod.loadouts = {
+	list = function ()
+		return loadouts.list()
+	end,
+
+	active = function ()
+		return mod:get(loadouts.ACTIVE_SETTING)
+	end,
+
+	default = function ()
+		return mod:get(loadouts.DEFAULT_SETTING)
+	end,
+
+	select = function (slug)
+		local data = loadouts.read(slug)
+
+		if not data then
+			return false
+		end
+
+		-- The outgoing loadout is flushed first, or edits made since its last
+		-- save are lost by switching away from it.
+		if loadout_dirty then
+			loadout_dirty = false
+			loadout_save_accum = 0
+
+			_save_active_loadout()
+		end
+
+		applying_loadout = true
+
+		local ok = pcall(loadouts.apply, data.settings)
+
+		applying_loadout = false
+
+		if not ok then
+			return false
+		end
+
+		mod:set(loadouts.ACTIVE_SETTING, slug, false)
+		buff_pool.invalidate()
+
+		return true
+	end,
+
+	create = function ()
+		local existing = loadouts.list()
+		local name = string.format("Loadout %d", #existing + 1)
+		local slug = loadouts.slugify(name)
+
+		-- Numbering off the count collides as soon as anything has been
+		-- deleted, and a collision would silently overwrite a loadout rather
+		-- than making a new one.
+		local suffix = 1
+
+		while loadouts.read(slug) do
+			suffix = suffix + 1
+			name = string.format("Loadout %d", #existing + suffix)
+			slug = loadouts.slugify(name)
+		end
+
+		-- First icon nobody is using, so a new loadout is distinguishable at a
+		-- glance without the player having to pick one. They can change it.
+		local taken = {}
+
+		for i = 1, #existing do
+			if existing[i].icon then
+				taken[existing[i].icon] = true
+			end
+		end
+
+		local icon = loadouts.ICONS[1]
+
+		for i = 1, #loadouts.ICONS do
+			if not taken[loadouts.ICONS[i]] then
+				icon = loadouts.ICONS[i]
+
+				break
+			end
+		end
+
+		if not loadouts.write(slug, { name = name, icon = icon, settings = loadouts.snapshot() }) then
+			return nil
+		end
+
+		loadouts.index_add(slug)
+		mod:set(loadouts.ACTIVE_SETTING, slug, false)
+
+		return slug
+	end,
+
+	set_default = function (slug)
+		mod:set(loadouts.DEFAULT_SETTING, slug, false)
+	end,
+
+	delete = function (slug)
+		if not loadouts.delete(slug) then
+			return false
+		end
+
+		loadouts.index_remove(slug)
+
+		-- Clearing the pointers matters more than the file: an active slug with
+		-- no file behind it means every later auto-save recreates the loadout
+		-- the player just deleted.
+		if mod:get(loadouts.ACTIVE_SETTING) == slug then
+			mod:set(loadouts.ACTIVE_SETTING, nil, false)
+		end
+
+		if mod:get(loadouts.DEFAULT_SETTING) == slug then
+			mod:set(loadouts.DEFAULT_SETTING, nil, false)
+		end
+
+		return true
+	end,
+
+	available = function ()
+		return loadouts.available()
+	end,
+
+	-- Explicit, because it is the only path left that spawns a process.
+	rescan = function ()
+		return loadouts.rescan()
+	end,
+
+	icons = function ()
+		return loadouts.ICONS
+	end,
+
+	set_icon = function (slug, icon)
+		local data = loadouts.read(slug)
+
+		if not data then
+			return false
+		end
+
+		return loadouts.write(slug, { name = data.name, icon = icon, settings = data.settings })
+	end,
+}
+
+-- First run: adopt whatever the player already has rather than starting empty.
+--
+-- Runs at load, before anything can have changed the settings, so the snapshot
+-- is genuinely their existing configuration. Also applies the default, which is
+-- the whole of what "default" means -- one apply, at startup.
+-- Defaults for the options that moved to the Settings tab.
+--
+-- DMF stamps a default only for settings that still have a widget in the data
+-- file (initialize_default_settings_and_keybinds walks the option tree). Moving
+-- an option out of that file therefore removes its default too, and a fresh
+-- install would read nil for every one of them -- which for a checkbox reads as
+-- "off" and for a numeric crashes whatever divides by it.
+--
+-- Applied with notify false: this runs before any loadout exists, and notifying
+-- would mark a loadout dirty for values nobody chose.
+local MOVED_DEFAULTS = {
+	difficulty_ramp = true,
+	use_bots = false,
+	ignore_buff_family = false,
+	pause_on_choice = true,
+	objective_enabled = true,
+	objective_side_missions = true,
+	kills_enabled = false,
+	time_enabled = false,
+	events_enabled = false,
+	custom_buff_weight = 1,
+	havoc_theme_chance = 50,
+	max_legendary_choices = 3,
+	-- Empty, meaning every family may be offered. Present rather than nil so it
+	-- reaches the loadout files: snapshot() enumerates the settings that exist,
+	-- and a setting nobody has touched yet does not exist to enumerate.
+	disabled_families = {},
+	starting_legendary_picks = 0,
+	starting_family_buffs = 0,
+	max_family_buffs = 7,
+	kills_threshold = 25,
+	time_interval = 5,
+	kills_mode = "elites_specials",
+}
+
+local function _apply_moved_defaults()
+	for id, value in pairs(MOVED_DEFAULTS) do
+		-- nil, not falsiness: a checkbox saved as false is a real choice.
+		if mod:get(id) == nil then
+			mod:set(id, value, false)
+		end
+	end
+end
+
+-- Loadouts written before family exclusions existed have no disabled_families
+-- in them, and applying one therefore leaves whatever was last set in place --
+-- so an old loadout silently inherits another's exclusions until the player
+-- edits it. Stamped as empty, meaning every family offered, which is what those
+-- loadouts meant when they were saved.
+--
+-- No flag guarding it: it only rewrites a file that is actually missing the key,
+-- so the second run finds nothing to do. A flag would be one more thing to get
+-- wrong for no benefit.
+local function _migrate_loadout_families()
+	local rows = loadouts.list()
+	local migrated = 0
+
+	for i = 1, #rows do
+		local row = rows[i]
+
+		if type(row.settings) == "table" and row.settings.disabled_families == nil then
+			row.settings.disabled_families = {}
+
+			if loadouts.write(row.slug, { name = row.name, icon = row.icon, settings = row.settings }) then
+				migrated = migrated + 1
+			end
+		end
+	end
+
+	if migrated > 0 then
+		mod:info("added the family-pick setting to %d loadout(s) saved before it existed", migrated)
+	end
+end
+
+local function _init_loadouts()
+	if not loadouts.available() then
+		mod:info("file access unavailable - loadouts are disabled this session")
+
+		return
+	end
+
+	if #loadouts.list() == 0 then
+		local name = "Default"
+		local slug = loadouts.slugify(name)
+
+		if loadouts.write(slug, { name = name, settings = loadouts.snapshot() }) then
+			loadouts.index_add(slug)
+			mod:set(loadouts.ACTIVE_SETTING, slug, false)
+			mod:set(loadouts.DEFAULT_SETTING, slug, false)
+			mod:info("created the first loadout from your current settings")
+		end
+
+		return
+	end
+
+	-- Before the default is applied, so the loadout being applied already has
+	-- the key and does not inherit the live value.
+	_migrate_loadout_families()
+
+	local default_slug = mod:get(loadouts.DEFAULT_SETTING)
+	local data = default_slug and loadouts.read(default_slug)
+
+	if not data then
+		return
+	end
+
+	applying_loadout = true
+
+	pcall(loadouts.apply, data.settings)
+
+	applying_loadout = false
+
+	mod:set(loadouts.ACTIVE_SETTING, default_slug, false)
+	mod:info("applied the default loadout '%s'", _escape(data.name))
+end
+
 particle_guard.install()
 spawn_guard.install()
 escape.install()
 custom_buffs.register()
+_apply_moved_defaults()
+_init_loadouts()
 
 -- Singleplay only, and not negotiable. On a hosted session the buff system
 -- sends rpc_client_mission_buffs_* to every remote player, and a client
@@ -217,7 +553,9 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 	mod.manager = manager
 	mod.game_mode = self
 
-	triggers.reset()
+	-- depth is missions_completed, incremented when a mission ends, so the first
+	-- mission of a run is the one that reads 0.
+	triggers.reset(run.depth() == 0)
 	asset_loader.request()
 	custom_buffs.register_network_lookup()
 	-- Retried here because the load-time attempt declines at boot: the engine
@@ -326,6 +664,76 @@ end
 -- Nothing here needs to re-apply the Rollable Buffs toggles: the handler passes
 -- buffs_to_exclude down and persistent_data filters against it, so a merged pool
 -- is filtered exactly like an unmerged one.
+-- Families switched off in Rollable Buffs never reach the opening choice.
+--
+-- The engine fills the three options straight out of
+-- MissionBuffsAllowedBuffs.available_family_builds, so the least invasive place
+-- to filter is that list: swapped for a filtered copy for the duration of the
+-- call and put back afterwards, including when the original throws. Editing it
+-- permanently would leak into every other reader of that table, this mod's and
+-- other mods' alike.
+mod:hook(MissionBuffsSelector, "create_buff_family_choice_for_player", function (func, self, player, num_choices)
+	local offered = buff_pool.offered_families()
+
+	-- Nothing switched off, or everything switched off: leave the engine alone.
+	-- An empty pool would mean a choice with no options, which is the mod
+	-- silently doing nothing for the rest of the run. The toggle is a
+	-- preference, not a way to break a mission.
+	if #offered == 0 or #offered == buff_pool.family_count() then
+		if #offered == 0 then
+			mod:debug_log("every family is switched off - offering all of them instead")
+		end
+
+		return func(self, player, num_choices)
+	end
+
+	-- A short pool repeats itself, which is fine and deliberately left alone --
+	-- with two families left there is nothing else to offer. The COUNT is
+	-- capped separately, in save_buff_family_choice_for_player below.
+	local original = MissionBuffsAllowedBuffs.available_family_builds
+
+	MissionBuffsAllowedBuffs.available_family_builds = offered
+
+	local ok, err = pcall(func, self, player, num_choices)
+
+	MissionBuffsAllowedBuffs.available_family_builds = original
+
+	if not ok then
+		mod:error("family choice failed: %s", _escape(tostring(err)))
+	end
+end)
+
+-- Three options, however short the pool is.
+--
+-- The top-up APPENDS rather than filling to a total: the weighted pass takes
+-- what it can from the pool, and if that came up short -- only possible once we
+-- have filtered below three -- the second pass adds up to three MORE from a
+-- fresh copy of the same pool. Two enabled families therefore produced a card
+-- with four buttons, and one produced two. Truncating the finished list is the
+-- robust place to fix that: it depends only on the shape of the array, not on
+-- the engine's internal use of num_choices.
+--
+-- Repeats within those three are left alone, so two families give
+-- "Fire / Cowboy / Fire" rather than a card with a button missing.
+local MAX_FAMILY_OPTIONS = 3
+
+mod:hook(MissionBuffsHandler, "save_buff_family_choice_for_player", function (func, self, player, family_name_choices)
+	if type(family_name_choices) ~= "table" or #family_name_choices <= MAX_FAMILY_OPTIONS then
+		return func(self, player, family_name_choices)
+	end
+
+	local trimmed = {}
+
+	for i = 1, MAX_FAMILY_OPTIONS do
+		trimmed[i] = family_name_choices[i]
+	end
+
+	mod:debug_log("family choice came back with %d options - trimmed to %d",
+		#family_name_choices, MAX_FAMILY_OPTIONS)
+
+	return func(self, player, trimmed)
+end)
+
 mod:hook(MissionBuffsHandler, "set_buff_family_for_player", function (func, self, player, family_name, priority_family_buffs, family_buffs, from_choice)
 	if not mod.manager or not mod:get("ignore_buff_family") then
 		return func(self, player, family_name, priority_family_buffs, family_buffs, from_choice)
@@ -724,7 +1132,7 @@ mod:command("cw_launch", mod:localize("command_cw_launch"), _open_launcher)
 -- Defined here rather than beside the buffs view because it calls
 -- _open_launcher, and a local referenced before its declaration compiles to a
 -- global read -- silently nil at runtime.
-local OUR_VIEWS = { LAUNCH_VIEW, BUFF_TOGGLE_VIEW, BUFFS_VIEW }
+local OUR_VIEWS = { LAUNCH_VIEW, BUFF_TOGGLE_VIEW, SETTINGS_VIEW, BUFFS_VIEW }
 
 local function _close_open_view()
 	local ui_manager = Managers.ui
@@ -770,6 +1178,28 @@ mod:command("cw_menu", mod:localize("command_cw_menu"), mod.toggle_menu)
 -- Buff toggle menu
 -- ---------------------------------------------------------------------------
 
+mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/settings_view")
+mod:register_view({
+	view_name = SETTINGS_VIEW,
+	view_settings = {
+		init_view_function = function (ingame_ui_context)
+			return true
+		end,
+		state_bound = true,
+		path = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/settings_view",
+		class = "ChaosWastesSettingsView",
+		disable_game_world = false,
+		load_always = true,
+		load_in_hub = true,
+		game_world_blur = 1.1,
+	},
+	view_transitions = {},
+	view_options = {
+		close_all = false,
+		close_previous = false,
+	},
+})
+
 mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buff_toggle_view")
 mod:register_view({
 	view_name = BUFF_TOGGLE_VIEW,
@@ -803,6 +1233,10 @@ mod:register_view({
 -- re-enter this handler -- and the reset also makes the same entry pickable
 -- again, since the widget re-reads its displayed value from mod:get each frame.
 mod.on_setting_changed = function (setting_id)
+	-- Every change marks the active loadout dirty, not just the one below --
+	-- "any edits while one is selected save to that preset" means all of them.
+	_mark_loadout_dirty()
+
 	if setting_id ~= "open_menu" then
 		return
 	end
@@ -1178,6 +1612,7 @@ mod.update = function (dt)
 	_update_run()
 	_update_pending_pool_init(dt)
 	_release_orphaned_pause_hold()
+	_update_loadout_save(dt)
 	triggers.update(dt)
 	pause.update()
 	custom_buffs.update(dt)
@@ -1334,8 +1769,15 @@ mod:command("cw_status", mod:localize("command_cw_status"), function ()
 
 	local stats = triggers.stats()
 
+	-- Totals, then the part of them that was free -- otherwise a run with a
+	-- starting hand reports more picks than the limit allows and reads as a bug.
 	mod:echo(string.format("Chaos Wastes at Home: %d family buffs, %d legendary picks granted this mission",
 		stats.family_granted, stats.legendary_granted))
+
+	if stats.starting_family_given > 0 or stats.starting_legendary_given > 0 then
+		mod:echo(string.format("  of those, %d family buffs and %d legendary picks were the starting hand, which does not count against the run's limits",
+			stats.starting_family_given, stats.starting_legendary_given))
+	end
 
 	local missing = particle_guard.missing_effects()
 

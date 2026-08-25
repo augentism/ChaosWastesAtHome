@@ -1,5 +1,7 @@
 local mod = get_mod("ChaosWastesAtHome")
 
+local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+
 local ViewElementInputLegend = require("scripts/ui/view_elements/view_element_input_legend/view_element_input_legend")
 
 local chain = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/chain")
@@ -57,6 +59,9 @@ LaunchView.on_enter = function (self)
 	-- close-then-open pattern the gambits preset editor uses to reach its
 	-- assignments screen.
 	widgets_by_name.tab_buffs.content.hotspot.pressed_callback = callback(self, "cb_tab_buffs")
+	widgets_by_name.tab_settings.content.hotspot.pressed_callback = callback(self, "cb_tab_settings")
+
+	strip.attach(self)
 
 	for i = 1, self._definitions.num_options do
 		local widget = widgets_by_name["option_" .. i]
@@ -296,6 +301,17 @@ LaunchView.cb_tab_buffs = function (self)
 	Managers.ui:open_view("chaos_wastes_buff_toggle_view")
 end
 
+LaunchView.cb_tab_settings = function (self)
+	Managers.ui:close_view(VIEW_NAME)
+	Managers.ui:open_view("chaos_wastes_settings_view")
+end
+
+-- The strip applied a different loadout, so anything this tab reads from
+-- settings is now stale.
+LaunchView.on_loadout_changed = function (self)
+	self:_reroll()
+end
+
 LaunchView.cb_on_back_pressed = function (self)
 	Managers.ui:close_view(VIEW_NAME)
 end
@@ -305,6 +321,8 @@ end
 -- ---------------------------------------------------------------------------
 
 LaunchView.update = function (self, dt, t, input_service)
+	strip.update(self, dt)
+
 	local index = self:_read_slider()
 
 	if index and index ~= self._rung_index then

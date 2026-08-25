@@ -6,6 +6,8 @@ local UIFontSettings = require("scripts/managers/ui/ui_font_settings")
 local UIWidget = require("scripts/managers/ui/ui_widget")
 local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 
+local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+
 local _s = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/launch_view_settings")
 
 local CARD_W = _s.card_size[1]
@@ -53,7 +55,7 @@ local scenegraph_definition = {
 		parent = "screen",
 		horizontal_alignment = "center",
 		size = { 280, 40 },
-		position = { -145, 84, 3 },
+		position = { -290, 84, 3 },
 	},
 
 	tab_buffs = {
@@ -61,7 +63,15 @@ local scenegraph_definition = {
 		parent = "screen",
 		horizontal_alignment = "center",
 		size = { 280, 40 },
-		position = { 145, 84, 3 },
+		position = { 0, 84, 3 },
+	},
+
+	tab_settings = {
+		vertical_alignment = "top",
+		parent = "screen",
+		horizontal_alignment = "center",
+		size = { 280, 40 },
+		position = { 290, 84, 3 },
 	},
 
 	title = {
@@ -283,6 +293,11 @@ local widget_definitions = {
 		{ original_text = mod:localize("tab_rollable_buffs") }
 	),
 
+	tab_settings = UIWidget.create_definition(
+		table.clone(ButtonPassTemplates.default_button), "tab_settings",
+		{ original_text = mod:localize("tab_settings") }
+	),
+
 	reroll_button = UIWidget.create_definition(
 		table.clone(ButtonPassTemplates.default_button), "reroll_button",
 		{ original_text = mod:localize("launch_reroll") }
@@ -306,6 +321,9 @@ local legend_inputs = {
 		alignment = "left_alignment",
 	},
 }
+
+
+strip.extend(scenegraph_definition, widget_definitions)
 
 return {
 	scenegraph_definition = scenegraph_definition,
