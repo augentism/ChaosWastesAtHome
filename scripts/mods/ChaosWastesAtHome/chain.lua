@@ -310,6 +310,31 @@ chain.roll_options = function (params, skip_ramp)
 		table.remove(pool, index)
 	end
 
+	-- The three cards as offered, in the order they appear on the picker.
+	--
+	-- build_havoc_data has already logged how each one was rolled; this is the
+	-- short list, and it is what a bug report gets matched against when a
+	-- player says which card they took. Environment is called out separately
+	-- from the rest because it is the field that has been lying: the label is
+	-- what the card shows, the theme is what the level actually loads with.
+	for i, option in ipairs(options) do
+		local theme = "default"
+
+		if option.havoc_data then
+			theme = string.split(option.havoc_data, ";")[3] or "?"
+		end
+
+		mod:info("picker option %d: %s (%s) | theme %s | card says: %s | %s",
+			i,
+			tostring(option.mission_name),
+			tostring(option.difficulty_label),
+			tostring(theme),
+			option.modifiers_label or "no modifiers",
+			option.havoc_data
+				and ("havoc_data " .. tostring(option.havoc_data))
+				or ("circumstance " .. tostring(option.circumstance_name)))
+	end
+
 	return options
 end
 
@@ -367,6 +392,17 @@ chain.launch = function (mission_context)
 		mission_context.havoc_data
 			and ("havoc_data " .. tostring(mission_context.havoc_data))
 			or ("circumstance " .. tostring(mission_context.circumstance_name)))
+
+	-- havoc_data spelled out, because the raw string is positional and nobody
+	-- reads it correctly at a glance. The theme field is the third one, and it
+	-- is the one that decides whether the level loads dark, gassed or vented,
+	-- independently of anything on the card.
+	if mission_context.havoc_data then
+		local parts = string.split(mission_context.havoc_data, ";")
+
+		mod:info("  launching havoc: rank %s | theme %s | faction %s | circumstances %s",
+			tostring(parts[2]), tostring(parts[3]), tostring(parts[4]), tostring(parts[5]))
+	end
 
 	Managers.multiplayer_session:reset("ChaosWastesAtHome run continuing")
 	Managers.multiplayer_session:boot_singleplayer_session()

@@ -286,7 +286,7 @@ return {
 		["zh-cn"] = "浩劫专属场景概率(%%)",
 	},
 	havoc_theme_chance_description = {
-		en = "How often a Havoc mission also gets its environmental theme - hunting grounds, ventilation purge or toxic gas - on top of its two rolled modifiers. 0 never, 100 always.",
+		en = "How often a Havoc mission also gets an environmental modifier - darkness, ventilation purge or toxic gas - on top of its two rolled modifiers. This controls the level itself as well as the card, so at 0 no mission loads with one. 0 never, 100 always.",
 		ru = "Как часто миссия Хавока также получает тематическое окружение - охотничьи угодья, вентиляционную очистку или токсичный газ - в дополнение к двум модификаторам. 0 - никогда, 100 - всегда.",
 		["zh-cn"] = "浩劫对局额外触发专属环境事件（狩猎场、浓雾、瘟疫毒气）的概率，0=永不触发，100=必定触发。",
 	},
@@ -645,6 +645,10 @@ return {
 	command_cw_give = {
 		en = "grant one buff by name - /cw_give [name or search text]",
 		ru = "выдать одно усиление по имени - /cw_give [имя или текст поиска]",
+	},
+	command_cw_modifiers = {
+		en = "list the modifiers and environment this mission actually loaded",
+		ru = "показать модификаторы и окружение, которые действительно загружены в этой миссии",
 	},
 	command_cw_verify = {
 		en = "check whether the custom buffs are attached and having an effect",

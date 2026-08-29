@@ -4,6 +4,7 @@ local DangerSettings = require("scripts/settings/difficulty/danger_settings")
 local HavocSettings = require("scripts/settings/havoc_settings")
 local CircumstanceTemplates = require("scripts/settings/circumstance/circumstance_templates")
 local HavocModifierConfig = require("scripts/settings/havoc/havoc_modifier_config")
+local MissionTemplates = require("scripts/settings/mission/mission_templates")
 
 -- The run's difficulty ladder.
 --
@@ -219,31 +220,93 @@ local function _roll_distinct(pool, count)
 	return picked
 end
 
+-- Themes the game itself considers valid for a mission.
+--
+-- Vanilla picks the theme first and the mission from that theme's list
+-- (Havoc.generate_havoc_data); here the mission is already chosen, so the
+-- constraint has to run the other way. A theme whose list does not name this
+-- mission has no theme packages for its level, so tagging the mission with it
+-- asks the loader for assets that do not exist.
+local function _themes_for_mission(mission_name)
+	local out = {}
+
+	for _, theme in ipairs(HavocSettings.themes) do
+		local missions = HavocSettings.missions[theme]
+
+		if missions then
+			for i = 1, #missions do
+				if missions[i] == mission_name then
+					out[#out + 1] = theme
+
+					break
+				end
+			end
+		end
+	end
+
+	return out
+end
+
 -- Builds the havoc_data string the mechanism expects. Format is positional and
 -- comes from Havoc.parse_data:
 --   mission;rank;theme;faction;circumstances;modifiers;challenge;resistance
 -- with circumstances and modifiers colon-separated.
 difficulty.build_havoc_data = function (rank, mission_name)
 	local challenge, resistance = _havoc_challenge_resistance(rank)
-	local theme = HavocSettings.themes[math.random(#HavocSettings.themes)]
 	local faction = HavocSettings.factions[math.random(#HavocSettings.factions)]
 	local circumstances = _roll_distinct(HavocSettings.circumstances, NUM_ROLLED_CIRCUMSTANCES)
 
 	local tier = rank >= FADING_LIGHT_TIER_2_RANK and 2 or 1
 
-	-- The theme circumstance (hunting grounds, ventilation purge, toxic gas)
-	-- is rolled rather than guaranteed, so not every Havoc mission carries an
-	-- environmental hazard on top of its modifiers. Its harsher second variant
-	-- comes in at the same rank the Fading Light escalates.
+	-- The theme circumstance (darkness, ventilation purge, toxic gas) is
+	-- rolled rather than guaranteed, so not every Havoc mission carries an
+	-- environmental modifier on top of its modifiers. Its harsher second
+	-- variant comes in at the same rank the Fading Light escalates.
 	--
-	-- The theme *name* still goes into havoc_data either way: the field is
-	-- positional and must stay well-formed, and it is only parsed, never acted
-	-- on -- the hazard itself comes from the circumstance we may have skipped.
+	-- The theme *field* is rolled along with it, and has to be, because it is
+	-- not cosmetic: HostThemeState.init and LevelLoader.start_loading both
+	-- read parsed_data.theme and hand it to
+	-- ThemePackage.level_resource_dependency_packages as the level's theme
+	-- tag. A mission tagged "darkness" therefore loads with the lights out
+	-- whether or not the darkness circumstance came with it.
+	--
+	-- That was this function's bug, and it is exactly the "environmental
+	-- modifier I never picked" symptom: with the chance at 0 the circumstance
+	-- was skipped -- so nothing showed on the card and no mutator was loaded
+	-- for it -- while a rolled theme still went out and the level was pitch
+	-- black anyway. "default" is what the game writes when a Havoc mission
+	-- has no environment, so that is what a skipped roll writes now.
 	local theme_chance = mod:get("havoc_theme_chance") or 100
-	local per_theme = HavocSettings.circumstances_per_theme[theme]
+	local roll = math.random(1, 100)
+	local wants_theme = theme_chance >= 100 or theme_chance > 0 and roll <= theme_chance
+	local theme = "default"
+	local theme_circumstance, theme_reason
 
-	if per_theme and (theme_chance >= 100 or theme_chance > 0 and math.random(1, 100) <= theme_chance) then
-		circumstances[#circumstances + 1] = per_theme[tier] or per_theme[1]
+	if not wants_theme then
+		theme_reason = string.format("none, roll failed (chance %d%%%%, rolled %d)", theme_chance, roll)
+	else
+		local candidates = _themes_for_mission(mission_name)
+
+		if #candidates > 0 then
+			theme = candidates[math.random(#candidates)]
+
+			local per_theme = HavocSettings.circumstances_per_theme[theme]
+
+			theme_circumstance = per_theme and (per_theme[tier] or per_theme[1])
+		end
+
+		if theme_circumstance then
+			circumstances[#circumstances + 1] = theme_circumstance
+			theme_reason = string.format("%s via %s (chance %d%%%%, rolled %d)",
+				theme, theme_circumstance, theme_chance, roll)
+		else
+			-- Rolled yes, but this mission supports no theme -- or the theme
+			-- it supports has no circumstance. Either way the theme tag goes
+			-- back to default rather than shipping on its own.
+			theme = "default"
+			theme_reason = string.format("none, no theme fits this mission (chance %d%%%%, rolled %d)",
+				theme_chance, roll)
+		end
 	end
 
 	circumstances[#circumstances + 1] = FADING_LIGHT[tier]
@@ -260,9 +323,14 @@ difficulty.build_havoc_data = function (rank, mission_name)
 		challenge,
 		resistance)
 
-	mod:debug_log("havoc rank", rank, "theme", theme, "faction", faction,
-		"| modifiers:", modifier_count,
-		"| circumstances:", table.concat(circumstances, ", "))
+	-- info, not debug_log: this is the line that answers "why did I get an
+	-- environmental modifier I did not ask for", and asking a player to turn
+	-- Diagnostics on and only then reproduce it costs a round trip. Three
+	-- lines per picker roll is not enough traffic to be worth that, and info
+	-- goes to the log file rather than chat.
+	mod:info("havoc roll: %s at rank %d | theme field: %s | environment: %s | faction %s | %d modifiers | circumstances: %s",
+		tostring(mission_name), rank, theme, theme_reason, tostring(faction), modifier_count,
+		table.concat(circumstances, ", "))
 
 	return data, challenge, resistance, circumstances
 end
@@ -374,6 +442,169 @@ difficulty.describe = function (params)
 
 	return string.format("challenge %s / resistance %s",
 		tostring(params.challenge), tostring(params.resistance))
+end
+-- ---------------------------------------------------------------------------
+-- What the mission you are actually standing in has applied
+-- ---------------------------------------------------------------------------
+
+-- The other half of the picture from build_havoc_data, read live.
+--
+-- The card describes what the mod *asked* for; this describes what the game
+-- *did* with it, which is not the same thing and is where an unexplained
+-- environmental modifier has to show up. Three independent sources, because
+-- each can disagree with the others and the disagreement is the finding:
+--
+--   * the parsed havoc_data, which is the request as the game received it
+--   * the theme tag, which loads the level's environment packages (darkness,
+--     ventilation purge, toxic gas) independently of any circumstance
+--   * the loaded mutators, which are what the circumstances actually became
+--
+-- Everything is pcall-guarded and every manager tested for: this runs during
+-- mission init, and a missing manager must produce a short report rather than
+-- take the mission down.
+local function _safe(fn, ...)
+	local ok, value = pcall(fn, ...)
+
+	return ok and value or nil
+end
+
+-- The environment packages a theme tag pulls in for a level.
+--
+-- Required lazily rather than at file scope: this module is loaded during
+-- boot, and a require that throws there is unrecoverable for the rest of the
+-- session (Lua leaves a sentinel in package.loaded).
+local function _theme_packages(level_name, theme_tag)
+	if not level_name or not theme_tag then
+		return nil
+	end
+
+	local ok, ThemePackage = pcall(require, "scripts/foundation/managers/package/utilities/theme_package")
+
+	if not ok or not ThemePackage or not ThemePackage.level_resource_dependency_packages then
+		return nil
+	end
+
+	local ok_pkgs, packages = pcall(ThemePackage.level_resource_dependency_packages, level_name, theme_tag)
+
+	if not ok_pkgs or type(packages) ~= "table" then
+		return nil
+	end
+
+	local names = {}
+
+	for _, name in pairs(packages) do
+		names[#names + 1] = tostring(name)
+	end
+
+	table.sort(names)
+
+	return names
+end
+
+difficulty.describe_active_mission = function ()
+	local lines = {}
+	local state = Managers.state
+
+	if not state then
+		return { "no gameplay state - not in a mission" }
+	end
+
+	local mission_manager = state.mission
+	local mission_name = mission_manager and _safe(mission_manager.mission_name, mission_manager)
+	local level_name = mission_name and MissionTemplates[mission_name] and MissionTemplates[mission_name].level
+
+	lines[#lines + 1] = string.format("mission: %s (level %s)",
+		tostring(mission_name), tostring(level_name))
+
+	local difficulty_manager = state.difficulty
+	local havoc = difficulty_manager and difficulty_manager.get_parsed_havoc_data
+		and _safe(difficulty_manager.get_parsed_havoc_data, difficulty_manager)
+
+	if difficulty_manager then
+		lines[#lines + 1] = string.format("difficulty: challenge %s / resistance %s (initial %s / %s)",
+			tostring(_safe(difficulty_manager.get_challenge, difficulty_manager)),
+			tostring(_safe(difficulty_manager.get_resistance, difficulty_manager)),
+			tostring(_safe(difficulty_manager.get_initial_challenge, difficulty_manager)),
+			tostring(_safe(difficulty_manager.get_initial_resistance, difficulty_manager)))
+	end
+
+	-- The theme tag is the one that can carry an environment nobody asked for,
+	-- so it gets its own line whether or not it is "default".
+	local theme_tag = havoc and havoc.theme
+
+	if havoc then
+		local names = {}
+
+		for _, id in ipairs(havoc.circumstances or {}) do
+			names[#names + 1] = tostring(id)
+		end
+
+		local modifiers = {}
+
+		for _, entry in ipairs(havoc.modifiers or {}) do
+			modifiers[#modifiers + 1] = string.format("%s.%s",
+				tostring(entry.name), tostring(entry.level))
+		end
+
+		table.sort(modifiers)
+
+		lines[#lines + 1] = string.format("havoc: rank %s, faction %s",
+			tostring(havoc.havoc_rank), tostring(havoc.faction))
+		lines[#lines + 1] = string.format("havoc circumstances (%d): %s",
+			#names, #names > 0 and table.concat(names, ", ") or "none")
+		lines[#lines + 1] = string.format("havoc modifiers (%d): %s",
+			#modifiers, #modifiers > 0 and table.concat(modifiers, ", ") or "none")
+	else
+		lines[#lines + 1] = "havoc: not a havoc mission (no havoc_data)"
+
+		local circumstance = state.circumstance
+		local circumstance_name = circumstance and _safe(circumstance.circumstance_name, circumstance)
+		local template = circumstance and _safe(circumstance.template, circumstance)
+
+		lines[#lines + 1] = string.format("circumstance: %s", tostring(circumstance_name))
+
+		theme_tag = template and template.theme_tag
+	end
+
+	local packages = _theme_packages(level_name, theme_tag)
+
+	lines[#lines + 1] = string.format("theme tag: %s%s",
+		tostring(theme_tag),
+		packages and string.format(" -> %d environment package(s)%s",
+			#packages, #packages > 0 and (": " .. table.concat(packages, ", ")) or "")
+			or "")
+
+	-- The ground truth. Circumstances are only a request; this is the list of
+	-- mutators the game built from them, and anything acting on the mission
+	-- that is not in here is not coming from a circumstance at all.
+	local mutator_manager = state.mutator
+	local mutators = mutator_manager and mutator_manager.all_activated_mutators
+		and _safe(mutator_manager.all_activated_mutators, mutator_manager)
+
+	if type(mutators) == "table" then
+		local names = {}
+
+		for name in pairs(mutators) do
+			names[#names + 1] = tostring(name)
+		end
+
+		table.sort(names)
+
+		lines[#lines + 1] = string.format("loaded mutators (%d): %s",
+			#names, #names > 0 and table.concat(names, ", ") or "none")
+	else
+		lines[#lines + 1] = "loaded mutators: mutator manager not available"
+	end
+
+	return lines
+end
+
+difficulty.log_active_mission = function (context)
+	for _, line in ipairs(difficulty.describe_active_mission()) do
+		-- The line goes in as an argument, not as the format string, so a '%'
+		-- in a package name lands in the output rather than in string.format.
+		mod:info("mission entered [%s] %s", tostring(context or "?"), line)
+	end
 end
 
 return difficulty

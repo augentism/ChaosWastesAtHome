@@ -1,0 +1,8 @@
+# Text files are stored and checked out with LF on every platform.
+#
+# Without this the tree's line endings follow whoever cloned it: git on
+# Windows checked these files out as CRLF and quietly normalised them back to
+# LF on commit, so the mismatch was invisible until the same tree was opened
+# on Linux, where nothing normalises and every CRLF file read as fully
+# modified. Committing the rule removes the platform from the question.
+* text=auto eol=lf

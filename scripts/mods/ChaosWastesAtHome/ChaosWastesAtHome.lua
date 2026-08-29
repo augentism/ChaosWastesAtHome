@@ -27,6 +27,7 @@ local triggers = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome
 local pause = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/pause")
 local run = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/run")
 local chain = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/chain")
+local difficulty = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/difficulty")
 local particle_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/particle_guard")
 local spawn_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/spawn_guard")
 local asset_loader = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/asset_loader")
@@ -1027,6 +1028,44 @@ end
 
 mod:hook("PlayerUnitSpawnManager", "_handle_initial_bot_spawning", _suppress_bot_spawning)
 mod:hook("PlayerUnitSpawnManager", "_handle_bot_spawning", _suppress_bot_spawning)
+
+-- ---------------------------------------------------------------------------
+-- What the mission you just entered actually applied
+-- ---------------------------------------------------------------------------
+
+-- Reported once per mission load, from every mission -- not just the mod's.
+--
+-- MutatorManager.on_gameplay_post_init is the earliest point where all three
+-- sources the report reads are populated: the difficulty manager has parsed
+-- havoc_data, the mutator manager has built its mutators from the
+-- circumstances, and the level's themes have been created. Hooking the game
+-- mode instead would run before the mutators exist and report an empty list.
+--
+-- Logged unconditionally rather than behind Diagnostics because the thing it
+-- is here to catch -- an environmental modifier the player did not pick -- is
+-- noticed after the fact, and a player who has to turn logging on and
+-- reproduce it has already lost the run that showed it. One block of six
+-- lines per mission load is cheap, and mod:info is log-only under DMF's
+-- defaults, so none of it reaches chat or notifications.
+mod:hook_safe("MutatorManager", "on_gameplay_post_init", function (self)
+	if not mod:is_enabled() then
+		return
+	end
+
+	local context = run.is_active()
+		and string.format("run active, mission %d", run.depth() + 1)
+		or "no run"
+
+	difficulty.log_active_mission(context)
+end)
+
+-- The same report on demand, for a player who is already standing in the
+-- mission and did not think to grab the log.
+mod:command("cw_modifiers", mod:localize("command_cw_modifiers"), function ()
+	for _, line in ipairs(difficulty.describe_active_mission()) do
+		mod:echo(line)
+	end
+end)
 
 -- ---------------------------------------------------------------------------
 -- Collected buffs screen
