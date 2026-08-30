@@ -93,6 +93,10 @@ return {
 		en = "End run & begin",
 		ru = "Завершить забег и начать",
 	},
+	launch_blocked_player_host = {
+		en = "Chaos Wastes at Home: a run cannot be launched from inside a player-hosted session yet. Remove Realms from mod_load_order.txt to play a chained run.",
+		ru = "Пустоши Хаоса у нас дома: забег пока нельзя запустить из сессии, размещённой игроком. Удалите Realms из mod_load_order.txt, чтобы играть в цепочке миссий.",
+	},
 	launch_hub_only = {
 		en = "Chaos Wastes at Home: a run can only be started from the Mourningstar or from one of this mod's own missions.",
 		ru = "Пустоши Хаоса у нас дома: забег можно начать только с Моунингстар.",

@@ -95,7 +95,7 @@ end
 -- only the name and stack count survive the mission, since buff_indexes refer
 -- to a buff extension that is about to be destroyed.
 run.capture = function (quiet)
-	local manager = mod.manager
+	local manager = mod.is_host() and mod.manager
 
 	if not manager then
 		if not quiet then
@@ -171,7 +171,7 @@ end
 -- Re-apply the carried family and buffs in the next mission. Called once the
 -- player has spawned and the manager for the new mission exists.
 run.restore = function ()
-	local manager = mod.manager
+	local manager = mod.is_host() and mod.manager
 
 	if not manager or not run.should_restore() then
 		return false

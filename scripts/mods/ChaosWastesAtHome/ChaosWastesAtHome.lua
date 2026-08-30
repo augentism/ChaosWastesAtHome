@@ -48,6 +48,70 @@ local BUFFS_VIEW = "chaos_wastes_buffs_view"
 mod.manager = nil
 mod.game_mode = nil
 
+-- Which side of the session we are playing.
+--
+-- "host" covers both a solo mission (host with no peers) and the host of a
+-- Realms session. "client" is a remote peer in a Realms session, where the
+-- buff manager exists to *receive* rather than to decide.
+--
+-- This exists because `mod.manager` used to carry two meanings at once -- "the
+-- buff system is live" and "I am the one who decides" -- and those come apart
+-- the moment a client runs the mod at all. Forty call sites read the old flag;
+-- each one is now explicitly one or the other.
+mod.role = nil
+
+local ROLES = {
+	host = "host",
+	client = "client",
+}
+
+-- Three tests, and picking the wrong one is how a client ends up granting
+-- itself buffs the host never issued:
+--
+--   mod.manager ~= nil   the buff system is live, either role. Presentation,
+--                        HUD, menus, local effects -- anything that only needs
+--                        to know the mod is running here. Unchanged meaning,
+--                        which is why most of the existing guards stay as they
+--                        are.
+--   mod.is_host()        we are the host, including plain solo. Lifecycle work
+--                        that has to survive teardown.
+--   mod.has_authority()  we are the host AND the game session is live. In-
+--                        mission acts.
+
+-- Host, without requiring a live game session.
+--
+-- Separate from has_authority because the run snapshot is captured during
+-- _destroy_buff_system, when the session is already going away. Gating that on
+-- a live session would silently lose the carryover at exactly the moment it is
+-- needed -- the failure would look like "buffs stopped carrying between
+-- missions" and point nowhere near here.
+function mod.is_host()
+	return mod.manager ~= nil and mod.role == ROLES.host
+end
+
+-- We are the one who decides. Granting buffs, spawning, counting kills toward
+-- a trigger -- anything a client must never do.
+--
+-- Stricter than is_host() on purpose. The game-session manager is absent
+-- during setup and teardown, and a hook firing in those windows would
+-- otherwise act with an authority it does not have. Realms' own integration
+-- docs prescribe the same test for authoritative logic.
+function mod.has_authority()
+	if not mod.is_host() then
+		return false
+	end
+
+	local game_session = Managers.state and Managers.state.game_session
+
+	if not game_session then
+		return false
+	end
+
+	local ok, is_server = pcall(game_session.is_server, game_session)
+
+	return ok and is_server or false
+end
+
 -- True only while our HordeMissionBuffsManager is being constructed, so the
 -- backend hook below can tell our instance apart from a real Mortis one before
 -- mod.manager has been assigned.
@@ -471,34 +535,106 @@ custom_buffs.register()
 _apply_moved_defaults()
 _init_loadouts()
 
--- Singleplay only, and not negotiable. On a hosted session the buff system
--- sends rpc_client_mission_buffs_* to every remote player, and a client
--- running the stock MissionBuffsManager has never registered those events --
--- the mod would break other people's game, not just this one.
-local function _should_activate(game_mode, game_mode_name)
-	if game_mode_name == "hub" or game_mode_name == "prologue_hub" then
-		return false
-	end
-
-	-- Opt-in. Without this the mod takes over every mission that happens to be
-	-- singleplay, which for anyone running SoloPlay is all of their solo play --
-	-- the "boons in normal matches" reports. A run has to be started from our
-	-- own launcher, and the flag rides along through every hop of the chain.
-	if not run.is_launched() then
-		return false
-	end
-
-	if not game_mode._is_server then
-		return false
-	end
-
+-- Which role, if any, this mod plays in the session we are in.
+--
+-- Three shapes qualify:
+--   singleplay    -- the solo case: host with no peers. The original.
+--   Realms host   -- HOST_TYPES.player and we own the connection host.
+--   Realms client -- HOST_TYPES.player and we are the remote peer.
+--
+-- nil for everything else, and that still includes a real Fatshark mission
+-- server. Widening this to cover Realms is not permission to run in matchmade
+-- play: there the server is somebody else's and the buff system would be
+-- talking to three strangers running the stock manager.
+--
+-- HOST_TYPES.player plus Managers.connection:is_host()/:is_client() is the
+-- detection Realms' own integration docs prescribe for other mods, so this
+-- reads the supported surface rather than a private field.
+local function _session_role()
 	local session_manager = Managers.multiplayer_session
 
-	if not session_manager or session_manager:host_type() ~= HOST_TYPES.singleplay then
-		return false
+	if not session_manager then
+		return nil
 	end
 
-	return true
+	local ok, host_type = pcall(session_manager.host_type, session_manager)
+
+	if not ok then
+		return nil
+	end
+
+	if host_type == HOST_TYPES.singleplay then
+		return ROLES.host
+	end
+
+	if host_type ~= HOST_TYPES.player then
+		return nil
+	end
+
+	local connection = Managers.connection
+
+	if not connection then
+		return nil
+	end
+
+	local host_ok, is_host = pcall(connection.is_host, connection)
+
+	if host_ok and is_host then
+		return ROLES.host
+	end
+
+	local client_ok, is_client = pcall(connection.is_client, connection)
+
+	if client_ok and is_client then
+		return ROLES.client
+	end
+
+	return nil
+end
+
+-- Returns a role string, or nil for "stay out of this mission".
+--
+-- A role rather than a boolean so no caller can forget which side it is on --
+-- getting that wrong is a client granting itself buffs the host never issued.
+--
+-- Why a client activates at all: the host runs HordeMissionBuffsManager and a
+-- vanilla client runs the stock MissionBuffsManager, which registers neither
+-- rpc_client_mission_buffs_buff_choices_received nor any of this mod's custom
+-- buff ids. The first card offered would be an unhandled network event and the
+-- first custom buff granted would be a read of a NetworkLookup key the client
+-- does not have -- a crash on their machine, caused by ours. Both sides
+-- running the same manager is what makes that safe, and the engine already
+-- supports it: HordeMissionBuffsManager.init handles is_server = false by
+-- registering the client RPCs and skipping the handler and selector.
+local function _should_activate(game_mode, game_mode_name)
+	if game_mode_name == "hub" or game_mode_name == "prologue_hub" then
+		return nil
+	end
+
+	local role = _session_role()
+
+	if not role then
+		return nil
+	end
+
+	-- Host-only preconditions, because a client can answer neither: it never
+	-- opened our launcher, and it is not the server by definition.
+	if role == ROLES.host then
+		-- Opt-in. Without this the mod takes over every mission that happens to
+		-- be singleplay, which for anyone running SoloPlay is all of their solo
+		-- play -- the "boons in normal matches" reports. A run has to be started
+		-- from our own launcher, and the flag rides along through every hop of
+		-- the chain.
+		if not run.is_launched() then
+			return nil
+		end
+
+		if not game_mode._is_server then
+			return nil
+		end
+	end
+
+	return role
 end
 
 -- Every non-hub game mode already builds a MissionBuffsManager here, which is
@@ -522,7 +658,9 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 		end
 	end
 
-	if not _should_activate(self, game_mode_name) then
+	local role = _should_activate(self, game_mode_name)
+
+	if not role then
 		return func(self, game_mode_name, network_event_delegate)
 	end
 
@@ -553,21 +691,38 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 	self._mission_buffs_manager = manager
 	mod.manager = manager
 	mod.game_mode = self
+	mod.role = role
 
-	-- depth is missions_completed, incremented when a mission ends, so the first
-	-- mission of a run is the one that reads 0.
-	triggers.reset(run.depth() == 0)
-	asset_loader.request()
+	-- Both roles.
+	--
+	-- The network lookup especially: the ids this mod appends have to agree on
+	-- every peer, and a client that skipped it would crash on the first custom
+	-- buff the host granted -- which is the whole reason a client activates.
 	custom_buffs.register_network_lookup()
-	-- Retried here because the load-time attempt declines at boot: the engine
-	-- module it hooks cannot be required until the game is further along.
-	custom_buffs.install_hooks()
-	custom_buffs.apply_weight()
-	custom_buffs.reset_counters()
+	asset_loader.request()
+
+	if role == ROLES.host then
+		-- depth is missions_completed, incremented when a mission ends, so the
+		-- first mission of a run is the one that reads 0.
+		triggers.reset(run.depth() == 0)
+		custom_buffs.apply_weight()
+		custom_buffs.reset_counters()
+
+		-- Host-only because the status cascade *applies* buffs to enemies,
+		-- which is a server act. On a client it would be writing to units it
+		-- does not own -- and its own owner check would make it a silent no-op
+		-- anyway, which is worse than not installing it.
+		--
+		-- Retried here because the load-time attempt declines at boot: the
+		-- engine module it hooks cannot be required until the game is further
+		-- along.
+		custom_buffs.install_hooks()
+	end
 
 	_warn_about_conflicts()
 
-	mod:info("Mortis buff system active in game mode '%s'", _escape(game_mode_name))
+	mod:info("Mortis buff system active in game mode '%s' as %s",
+		_escape(game_mode_name), role)
 end)
 
 -- Mortis asks the title backend for buff-family weights and a deactivated-buff
@@ -736,7 +891,7 @@ mod:hook(MissionBuffsHandler, "save_buff_family_choice_for_player", function (fu
 end)
 
 mod:hook(MissionBuffsHandler, "set_buff_family_for_player", function (func, self, player, family_name, priority_family_buffs, family_buffs, from_choice)
-	if not mod.manager or not mod:get("ignore_buff_family") then
+	if not mod.has_authority() or not mod:get("ignore_buff_family") then
 		return func(self, player, family_name, priority_family_buffs, family_buffs, from_choice)
 	end
 
@@ -907,6 +1062,7 @@ mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (s
 
 	mod.manager = nil
 	mod.game_mode = nil
+	mod.role = nil
 	restored_this_mission = false
 	capture_accum = 0
 
@@ -1142,7 +1298,9 @@ mod:register_view({
 -- works: the mechanism is `adventure` rather than `hub`, so nothing is mid-
 -- transition reading an extension manager that is about to disappear.
 local function _can_open_launcher()
-	if mod.manager then
+	-- is_host, not just "a mission is running": a client pressing Begin would
+	-- reset a run it does not own and relaunch the session it is a guest in.
+	if mod.is_host() then
 		return true
 	end
 
@@ -1565,7 +1723,7 @@ end
 -- player who already has one -- so restoring first is what stops a continued
 -- run from re-prompting you to pick a family every mission.
 local function _update_run()
-	if not mod.manager then
+	if not mod.is_host() then
 		return
 	end
 
@@ -1707,7 +1865,7 @@ local function _end_mission(won)
 		return false
 	end
 
-	if not mod.manager then
+	if not mod.has_authority() then
 		mod:echo(mod:localize("debug_end_unavailable"))
 
 		return false
@@ -1748,7 +1906,7 @@ mod:command("cw_win", mod:localize("command_cw_win"), mod.debug_end_mission_won)
 mod:command("cw_lose", mod:localize("command_cw_lose"), mod.debug_end_mission_lost)
 
 mod:command("cw_buff", mod:localize("command_cw_buff"), function (kind)
-	if not mod.manager then
+	if not mod.has_authority() then
 		mod:echo(mod:localize("command_not_active"))
 
 		return

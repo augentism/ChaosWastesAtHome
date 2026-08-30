@@ -217,7 +217,7 @@ end
 -- against that total minus the ones that came free, so the run's own triggers
 -- still get their full allowance afterwards.
 triggers.grant_family = function (off_budget)
-	if not mod.manager then
+	if not mod.has_authority() then
 		return false
 	end
 
@@ -257,7 +257,7 @@ end
 
 -- off_budget as above: a starting pick, extra rather than an advance.
 triggers.grant_legendary = function (off_budget)
-	if not mod.manager then
+	if not mod.has_authority() then
 		return false
 	end
 
@@ -304,7 +304,7 @@ end
 -- kind is already exhausted for the mission we fall back to the other one, so
 -- a trigger never silently does nothing while budget remains.
 triggers.fire = function (source)
-	if not mod.manager then
+	if not mod.has_authority() then
 		return false
 	end
 
@@ -344,7 +344,7 @@ end
 mod:hook(MissionObjectiveSystem, "end_mission_objective", function (func, self, objective_name, group_id)
 	local should_fire = false
 
-	if mod.manager and mod:get("objective_enabled") then
+	if mod.has_authority() and mod:get("objective_enabled") then
 		local ok, objective = pcall(self.active_objective, self, objective_name, group_id)
 
 		if ok and objective then
@@ -398,7 +398,7 @@ local function _kill_counts(unit)
 end
 
 mod:hook_safe(MinionDeathManager, "set_dead", function (self, unit)
-	if not mod.manager or not mod:get("kills_enabled") then
+	if not mod.has_authority() or not mod:get("kills_enabled") then
 		return
 	end
 
@@ -548,7 +548,7 @@ local function _repump_notifications(dt)
 end
 
 triggers.update = function (dt)
-	if not mod.manager then
+	if not mod.has_authority() then
 		return
 	end
 

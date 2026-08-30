@@ -650,7 +650,7 @@ custom_buffs.install_hooks = function ()
 		-- would have cascaded (nobody has the buff), but doing the work was
 		-- wrong before it was also unsafe, and the guard below is only
 		-- reachable because this one was missing.
-		if not mod.manager or not mod:is_enabled() then
+		if not mod.has_authority() or not mod:is_enabled() then
 			return
 		end
 
