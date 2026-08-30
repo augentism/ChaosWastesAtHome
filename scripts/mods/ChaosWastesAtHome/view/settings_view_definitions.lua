@@ -1,12 +1,12 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-local ButtonPassTemplates = require("scripts/ui/pass_templates/button_pass_templates")
 local SliderPassTemplates = require("scripts/ui/pass_templates/slider_pass_templates")
 local UIFontSettings = require("scripts/managers/ui/ui_font_settings")
 local UIWidget = require("scripts/managers/ui/ui_widget")
 local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 
 local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
 
 -- Everything a loadout controls, other than which buffs can roll.
 --
@@ -200,30 +200,6 @@ end
 local scenegraph_definition = {
 	screen = UIWorkspaceSettings.screen,
 
-	tab_start = {
-		vertical_alignment = "top",
-		parent = "screen",
-		horizontal_alignment = "center",
-		size = { 280, 40 },
-		position = { -290, 84, 3 },
-	},
-
-	tab_buffs = {
-		vertical_alignment = "top",
-		parent = "screen",
-		horizontal_alignment = "center",
-		size = { 280, 40 },
-		position = { 0, 84, 3 },
-	},
-
-	tab_settings = {
-		vertical_alignment = "top",
-		parent = "screen",
-		horizontal_alignment = "center",
-		size = { 280, 40 },
-		position = { 290, 84, 3 },
-	},
-
 	title = {
 		vertical_alignment = "top",
 		parent = "screen",
@@ -234,21 +210,6 @@ local scenegraph_definition = {
 }
 
 local widget_definitions = {
-	tab_start = UIWidget.create_definition(
-		table.clone(ButtonPassTemplates.default_button), "tab_start",
-		{ original_text = mod:localize("tab_start_run") }
-	),
-
-	tab_buffs = UIWidget.create_definition(
-		table.clone(ButtonPassTemplates.default_button), "tab_buffs",
-		{ original_text = mod:localize("tab_rollable_buffs") }
-	),
-
-	tab_settings = UIWidget.create_definition(
-		table.clone(ButtonPassTemplates.default_button), "tab_settings",
-		{ original_text = mod:localize("tab_settings") }
-	),
-
 	title = UIWidget.create_definition({
 		{
 			pass_type = "text",
@@ -425,6 +386,7 @@ local legend_inputs = {
 	},
 }
 
+tab_strip.extend(scenegraph_definition, widget_definitions)
 strip.extend(scenegraph_definition, widget_definitions, { actions = true })
 
 return {

@@ -5,6 +5,8 @@ local UIFontSettings = require("scripts/managers/ui/ui_font_settings")
 local UIWidget = require("scripts/managers/ui/ui_widget")
 local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 
+local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
+
 local GRID_W = 920
 local GRID_H = 620
 local ROW_H = 92
@@ -204,6 +206,8 @@ local legend_inputs = {
 		alignment = "left_alignment",
 	},
 }
+
+tab_strip.extend(scenegraph_definition, widget_definitions)
 
 return {
 	scenegraph_definition = scenegraph_definition,

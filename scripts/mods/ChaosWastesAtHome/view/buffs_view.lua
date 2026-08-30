@@ -7,8 +7,8 @@ local UIWidgetGrid = require("scripts/ui/widget_logic/ui_widget_grid")
 local ViewElementInputLegend = require("scripts/ui/view_elements/view_element_input_legend/view_element_input_legend")
 
 local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_pool")
-local pause = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/pause")
 local run = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/run")
+local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
 
 -- Everything the run has collected so far, on a keybind, with the world stopped
 -- while it is open.
@@ -61,9 +61,7 @@ BuffsView.on_enter = function (self)
 		self._input_legend_element:add_entry(leg.display_name, leg.input_action, nil, cb, leg.alignment)
 	end
 
-	-- Held for as long as the screen is up. Released in on_exit, and pause.update
-	-- restores the timer scale from there like any other reason.
-	pause.set_hold(true)
+	tab_strip.attach(self, "collected")
 
 	self:_build_rows()
 end
@@ -214,10 +212,6 @@ BuffsView.draw = function (self, dt, t, input_service, layer)
 end
 
 BuffsView.on_exit = function (self)
-	-- Released unconditionally. If this is missed the world stays stopped for
-	-- the rest of the mission, so it happens before anything that could fail.
-	pause.set_hold(false)
-
 	if self._input_legend_element then
 		self:_remove_element("input_legend")
 

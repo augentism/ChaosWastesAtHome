@@ -1122,13 +1122,22 @@ mod:register_view({
 	},
 })
 
--- Only from the hub.
+-- The Mourningstar, or one of our own missions. Never the main menu.
 --
--- chain.launch waits on _session_boot.leaving_game_session, and that flag is
--- only ever set when a live Managers.state.game_session exists. From the hub or
--- a mission it flips; from the main menu it never does and the promise waits
--- forever. Mid-mission launching is the chain's job, not this screen's.
+-- The real requirement is chain.launch's: it waits on
+-- _session_boot.leaving_game_session, and that flag is only ever set when a
+-- live Managers.state.game_session exists. From the hub or a mission it flips;
+-- from the main menu it never does and the promise waits forever.
+--
+-- A mission qualifies only if it is one of ours -- mod.manager, the same "is
+-- my thing live" test everything else gates on. Relaunching out of somebody
+-- else's game, or out of a mission this mod is not running, is not something
+-- this screen should offer.
 local function _can_open_launcher()
+	if mod.manager then
+		return true
+	end
+
 	local game_mode_manager = Managers.state and Managers.state.game_mode
 
 	if not game_mode_manager then
@@ -1627,30 +1636,45 @@ local function _update_pending_pool_init(dt)
 	end
 end
 
--- The hold is released in the view's on_exit, but on_exit is not guaranteed --
--- a mod reload with the screen open, or a mission tearing down underneath it,
--- both skip it. A stranded hold means the gameplay timer stays at zero for the
--- rest of the session, so the state is reconciled against the view every frame
--- rather than trusted.
-local function _release_orphaned_pause_hold()
-	if not pause.is_held() then
+-- The hold is derived, not trusted.
+--
+-- Two reasons it cannot be left to the views. First, on_exit is not
+-- guaranteed: a mod reload with the screen open, or a mission tearing down
+-- underneath it, both skip it, and a stranded hold means the gameplay timer
+-- stays at zero for the rest of the session. Second, the tabs -- moving from
+-- the collected-buffs screen to Settings closes one view and opens another,
+-- and if the hold belonged to whichever view last ran a callback, the world
+-- would start moving again the moment you changed tab. Any of our screens
+-- being open is the condition, so it is computed from that every frame.
+local function _reconcile_pause_hold()
+	local ui_manager = Managers.ui
+	local want_hold = false
+
+	if ui_manager then
+		for _, view_name in ipairs(OUR_VIEWS) do
+			if ui_manager:view_active(view_name) then
+				want_hold = true
+
+				break
+			end
+		end
+	end
+
+	if want_hold == pause.is_held() then
 		return
 	end
 
-	if Managers.ui and Managers.ui:view_active(BUFFS_VIEW) then
-		return
-	end
+	pause.set_hold(want_hold)
 
-	pause.set_hold(false)
-
-	mod:debug_log("released an orphaned pause hold")
+	mod:debug_log(want_hold and "holding the pause for an open menu"
+		or "released the pause hold; no menu open")
 end
 
 mod.update = function (dt)
 	_update_pending_launch(dt)
 	_update_run()
 	_update_pending_pool_init(dt)
-	_release_orphaned_pause_hold()
+	_reconcile_pause_hold()
 	_update_loadout_save(dt)
 	triggers.update(dt)
 	pause.update()

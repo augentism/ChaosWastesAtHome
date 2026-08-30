@@ -7,6 +7,7 @@ local UIWidget = require("scripts/managers/ui/ui_widget")
 local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 
 local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
 
 local _s = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buff_toggle_view_settings")
 
@@ -26,32 +27,6 @@ local ICON_SIZE = 96
 
 local scenegraph_definition = {
 	screen = UIWorkspaceSettings.screen,
-
-	-- The same pair the launcher carries, in the same place, so switching does
-	-- not move the controls under the cursor.
-	tab_start = {
-		vertical_alignment = "top",
-		parent = "screen",
-		horizontal_alignment = "center",
-		size = { 280, 40 },
-		position = { -290, 84, 3 },
-	},
-
-	tab_buffs = {
-		vertical_alignment = "top",
-		parent = "screen",
-		horizontal_alignment = "center",
-		size = { 280, 40 },
-		position = { 0, 84, 3 },
-	},
-
-	tab_settings = {
-		vertical_alignment = "top",
-		parent = "screen",
-		horizontal_alignment = "center",
-		size = { 280, 40 },
-		position = { 290, 84, 3 },
-	},
 
 	title_divider = {
 		vertical_alignment = "top",
@@ -403,21 +378,6 @@ local widget_definitions = {
 		},
 	}, "buff_grid_mask"),
 
-	tab_start = UIWidget.create_definition(
-		table.clone(ButtonPassTemplates.default_button), "tab_start",
-		{ original_text = mod:localize("tab_start_run") }
-	),
-
-	tab_buffs = UIWidget.create_definition(
-		table.clone(ButtonPassTemplates.default_button), "tab_buffs",
-		{ original_text = mod:localize("tab_rollable_buffs") }
-	),
-
-	tab_settings = UIWidget.create_definition(
-		table.clone(ButtonPassTemplates.default_button), "tab_settings",
-		{ original_text = mod:localize("tab_settings") }
-	),
-
 	-- default_button reads its label from original_text, not text: a
 	-- change_function overwrites content.text every frame.
 	enable_all_button = UIWidget.create_definition(
@@ -450,6 +410,7 @@ local legend_inputs = {
 	},
 }
 
+tab_strip.extend(scenegraph_definition, widget_definitions)
 strip.extend(scenegraph_definition, widget_definitions)
 
 return settings("ChaosWastesBuffToggleViewDefinitions", {

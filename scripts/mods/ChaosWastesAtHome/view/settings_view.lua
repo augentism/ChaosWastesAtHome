@@ -3,6 +3,7 @@ local mod = get_mod("ChaosWastesAtHome")
 local ViewElementInputLegend = require("scripts/ui/view_elements/view_element_input_legend/view_element_input_legend")
 
 local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
 
 -- The Settings tab: everything a loadout carries except the buff pool.
 --
@@ -42,9 +43,7 @@ SettingsView.on_enter = function (self)
 
 	widgets_by_name.title.content.text = mod:localize("settings_title")
 
-	widgets_by_name.tab_start.content.hotspot.pressed_callback = callback(self, "cb_tab_start")
-	widgets_by_name.tab_buffs.content.hotspot.pressed_callback = callback(self, "cb_tab_buffs")
-	widgets_by_name.tab_settings.content.hotspot.disabled = true
+	tab_strip.attach(self, "settings")
 
 	for i = 1, #self._definitions.checkboxes do
 		widgets_by_name["check_" .. i].content.hotspot.pressed_callback = callback(self, "cb_toggle", i)
@@ -282,16 +281,6 @@ SettingsView.cb_cycle = function (self, index)
 	mod:set(spec.id, spec.values[next_index], true)
 
 	self:_refresh()
-end
-
-SettingsView.cb_tab_start = function (self)
-	Managers.ui:close_view(VIEW_NAME)
-	Managers.ui:open_view("chaos_wastes_launch_view")
-end
-
-SettingsView.cb_tab_buffs = function (self)
-	Managers.ui:close_view(VIEW_NAME)
-	Managers.ui:open_view("chaos_wastes_buff_toggle_view")
 end
 
 SettingsView.cb_on_back_pressed = function (self)

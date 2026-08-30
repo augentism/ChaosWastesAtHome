@@ -39,6 +39,10 @@ return {
 		en = "Rollable Buffs",
 		ru = "Случайные усиления",
 	},
+	tab_collected = {
+		en = "Buffs Collected",
+		ru = "Собранные усиления",
+	},
 	command_cw_menu = {
 		en = "open the Chaos Wastes menu for where you are",
 		ru = "открыть меню Пустошей Хаоса для текущего местоположения",
@@ -85,8 +89,12 @@ return {
 		en = "Begin the run",
 		ru = "Начать забег",
 	},
+	launch_begin_replace = {
+		en = "End run & begin",
+		ru = "Завершить забег и начать",
+	},
 	launch_hub_only = {
-		en = "Chaos Wastes at Home: a run can only be started from the Mourningstar.",
+		en = "Chaos Wastes at Home: a run can only be started from the Mourningstar or from one of this mod's own missions.",
 		ru = "Пустоши Хаоса у нас дома: забег можно начать только с Моунингстар.",
 	},
 	command_cw_launch = {

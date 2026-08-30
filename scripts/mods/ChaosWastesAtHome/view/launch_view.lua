@@ -1,6 +1,7 @@
 local mod = get_mod("ChaosWastesAtHome")
 
 local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
+local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
 
 local ViewElementInputLegend = require("scripts/ui/view_elements/view_element_input_legend/view_element_input_legend")
 
@@ -55,11 +56,21 @@ LaunchView.on_enter = function (self)
 	widgets_by_name.reroll_button.content.hotspot.pressed_callback = callback(self, "cb_reroll")
 	widgets_by_name.begin_button.content.hotspot.pressed_callback = callback(self, "cb_begin")
 
-	-- The tab for this screen does nothing; the other one swaps views. Same
-	-- close-then-open pattern the gambits preset editor uses to reach its
-	-- assignments screen.
-	widgets_by_name.tab_buffs.content.hotspot.pressed_callback = callback(self, "cb_tab_buffs")
-	widgets_by_name.tab_settings.content.hotspot.pressed_callback = callback(self, "cb_tab_settings")
+	tab_strip.attach(self, "start")
+
+	-- Says what the button will actually do. Opened from a mission, Begin
+	-- discards the run you are on -- cb_begin has always called run.reset
+	-- first, because a new run starts from nothing -- and that used to be
+	-- unreachable from anywhere but the Mourningstar, where there is no run to
+	-- lose. Relabelling is the whole warning: a confirmation step on a screen
+	-- you had to open and then pick a mission on is a click asking permission
+	-- for a click.
+	--
+	-- original_text, not text: default_button's change_function rewrites
+	-- content.text every frame.
+	if run.is_active() then
+		widgets_by_name.begin_button.content.original_text = mod:localize("launch_begin_replace")
+	end
 
 	strip.attach(self)
 
@@ -294,16 +305,6 @@ LaunchView.cb_begin = function (self)
 			side_mission = "default",
 		})
 	end)
-end
-
-LaunchView.cb_tab_buffs = function (self)
-	Managers.ui:close_view(VIEW_NAME)
-	Managers.ui:open_view("chaos_wastes_buff_toggle_view")
-end
-
-LaunchView.cb_tab_settings = function (self)
-	Managers.ui:close_view(VIEW_NAME)
-	Managers.ui:open_view("chaos_wastes_settings_view")
 end
 
 -- The strip applied a different loadout, so anything this tab reads from
