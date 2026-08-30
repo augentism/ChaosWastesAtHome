@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "0.6.0"
+mod.version = "0.7.0"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -1133,6 +1133,14 @@ mod:register_view({
 -- my thing live" test everything else gates on. Relaunching out of somebody
 -- else's game, or out of a mission this mod is not running, is not something
 -- this screen should offer.
+--
+-- Launching straight out of a live mission is a path the chain itself never
+-- takes -- every hop goes mission -> end screen -> hub, and _update_pending_launch
+-- waits for the hub to settle before it calls chain.launch, because that
+-- teardown killed the game once. Going direct from a mission was therefore an
+-- assumption when this gate was widened. It has since been tested in game and
+-- works: the mechanism is `adventure` rather than `hub`, so nothing is mid-
+-- transition reading an extension manager that is about to disappear.
 local function _can_open_launcher()
 	if mod.manager then
 		return true

@@ -54,9 +54,21 @@ One keybind, and what it opens depends on where you are:
 
 | Where | What opens |
 |---|---|
-| Mourningstar | **Start a Crusade** — the launcher, with a **Rollable Buffs** tab |
-| In a run | **Buffs Collected** — everything you are carrying, with the game paused |
+| Mourningstar | **Start a Crusade** — the launcher |
+| In a run | **Buffs Collected** — everything you are carrying |
 | Anything already open | Closes it |
+
+Whichever one you land on, the rest are tabs across the top of it. In a mission
+there are four — Start a Crusade, Rollable Buffs, Settings, Buffs Collected —
+and the game stays paused for as long as any of them is open, including while
+you move between them. In the Mourningstar there are three; Buffs Collected
+needs a run to have something to show.
+
+**Start a Crusade opened from inside a mission ends the run you are on.** It
+counts as a loss and everything it collected is gone, then you go straight into
+the new mission — no defeat screen, no stop in the Mourningstar. The button
+reads *End run & begin* while a run is live so it is clear what it does. There
+is no confirmation step beyond that.
 
 **Rollable Buffs** lists every buff that can be rolled, grouped by family and by
 class, with its icon and real description. Almost everything is on by default;
