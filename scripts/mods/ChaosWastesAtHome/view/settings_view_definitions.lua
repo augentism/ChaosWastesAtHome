@@ -44,6 +44,7 @@ local LAYOUT = {
 
 		{ kind = "header", key = "settings_section_buffs" },
 		{ kind = "check", id = "pause_on_choice" },
+		{ kind = "check", id = "sync_pause_multiplayer" },
 		{ kind = "check", id = "ignore_buff_family" },
 		{ kind = "slider", id = "starting_legendary_picks", min = 0, max = 12, step = 1 },
 		{ kind = "slider", id = "starting_family_buffs", min = 0, max = 24, step = 1 },

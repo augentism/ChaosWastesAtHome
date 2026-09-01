@@ -3,7 +3,6 @@ local mod = get_mod("ChaosWastesAtHome")
 local CircumstanceTemplates = require("scripts/settings/circumstance/circumstance_templates")
 local MissionTemplates = require("scripts/settings/mission/mission_templates")
 local MutatorTemplates = require("scripts/settings/mutator/mutator_templates")
-local MatchmakingConstants = require("scripts/settings/network/matchmaking_constants")
 local Promise = require("scripts/foundation/utilities/promise")
 
 local run = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/run")
@@ -375,47 +374,35 @@ end
 -- Launches a mission context, replacing the current session. Mirrors
 -- SoloPlay.start_game: the session has to finish tearing down before
 -- change_mechanism will take, hence the poll.
--- A player-hosted session is one this mod cannot hop out of. Yet.
 --
--- The hop is multiplayer_session:reset() + boot_singleplayer_session(), and
--- Realms hooks the second of those to turn every local session into a listen
--- server. Doing it from inside a live Realms session tears the listen host
--- down, rebuilds it on a new port, defers the mechanism change and routes the
--- whole thing through RealmsPreparationState. Measured 2026-08-30: that ran
--- away with memory during the level load and locked the machine hard -- no
--- crash dump, log truncated mid-write.
+-- Under Realms this is a re-host, and that is the right shape rather than a
+-- compromise. Realms hooks boot_singleplayer_session and turns the new local
+-- session into a listen server, so the sequence below tears the old host down
+-- and stands a fresh one up. Clients are dropped by the reset and reconnect to
+-- it; net.lua announces the hop before it happens so they know to.
 --
--- HOST_TYPES.player rather than asking for the Realms mod: the shape of the
--- session is the actual hazard, and this stays correct for anything else that
--- hosts one.
+-- The alternative -- calling change_mechanism *without* a reset, so Realms
+-- defers it and the party is kept -- does not work, and it cost three parked
+-- sessions to establish that. Realms' Preparation phase machine only reaches
+-- the completing transition from `waiting`; `waiting` is only reached from
+-- `host_booting`; and `host_booting` is set by exactly one function,
+-- Preparation.host_boot_started, called only from the boot_singleplayer_session
+-- hook. With no re-boot the phase is still `started`, so
+-- host_mechanism_configured is a no-op, host_installed() stays false and
+-- main_menu_transition is never set -- while the deferral has already forced
+-- every wanted_transition to return StateLoading (session.lua:518-520). That is
+-- the loading screen that never resolves.
 --
--- This is a seatbelt, not the fix. The fix is the reconnect design in
--- research/CWAH-MULTIPLAYER.md §2, which keeps the party across the hop
--- instead of walking into Realms' own transition.
-local function _session_blocks_launch()
-	local session_manager = Managers.multiplayer_session
-
-	if not session_manager then
-		return false
-	end
-
-	local ok, host_type = pcall(session_manager.host_type, session_manager)
-
-	return ok and host_type == MatchmakingConstants.HOST_TYPES.player
-end
-
+-- The 2026-08-30 lockup was read as this path failing. It did not: the log
+-- shows the listen host coming up on 54044, RealmsPreparationState entered,
+-- StateLoading run, every GameplayInitStep completing in order and this mod's
+-- own game-mode shim installing. Memory ran away during that level load and
+-- took the machine with it -- a real problem, and a separate one.
 chain.launch = function (mission_context)
 	local mission = MissionTemplates[mission_context.mission_name]
 
 	if not mission then
 		mod:error("cannot launch unknown mission '%s'", tostring(mission_context.mission_name))
-
-		return false
-	end
-
-	if _session_blocks_launch() then
-		mod:echo(mod:localize("launch_blocked_player_host"))
-		mod:error("refusing to launch from inside a player-hosted session - the chain cannot hop out of one yet")
 
 		return false
 	end
@@ -439,6 +426,18 @@ chain.launch = function (mission_context)
 
 		mod:info("  launching havoc: rank %s | theme %s | faction %s | circumstances %s",
 			tostring(parts[2]), tostring(parts[3]), tostring(parts[4]), tostring(parts[5]))
+	end
+
+	-- Last call before the reset takes the bus with it. A no-op from the hub,
+	-- where there is nothing to announce to; it earns its keep when the
+	-- launcher is used from inside a live mission with clients attached.
+	--
+	-- Guarded rather than called: this file is io_dofile'd and re-executes on
+	-- every call, while the main script that parks the accessor only re-runs on
+	-- an actual mod reload -- so a redeployed chain.lua can find itself running
+	-- against a main script from before the accessor existed.
+	if mod.announce_hop then
+		mod.announce_hop(mission_context.mission_name)
 	end
 
 	Managers.multiplayer_session:reset("ChaosWastesAtHome run continuing")

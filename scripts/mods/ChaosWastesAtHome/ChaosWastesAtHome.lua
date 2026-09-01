@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "0.7.0"
+mod.version = "0.9.8"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -36,6 +36,7 @@ local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHom
 local escape = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/escape")
 local solo = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/solo")
 local loadouts = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/loadouts")
+local net = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/net")
 
 local SETTINGS_VIEW = "chaos_wastes_settings_view"
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
@@ -427,6 +428,7 @@ local MOVED_DEFAULTS = {
 	use_bots = false,
 	ignore_buff_family = false,
 	pause_on_choice = true,
+	sync_pause_multiplayer = false,
 	objective_enabled = true,
 	objective_side_missions = true,
 	kills_enabled = false,
@@ -532,6 +534,46 @@ particle_guard.install()
 spawn_guard.install()
 escape.install()
 custom_buffs.register()
+
+-- Parked here rather than reached for: net.lua must not io_dofile custom_buffs,
+-- which re-executes and would be a second registration.
+mod.custom_buff_id_map = custom_buffs.network_id_map
+
+-- Same reason: pause.lua asks this rather than loading net.lua itself.
+-- Any connection at all, ready or not. The pause has to respect a client that
+-- is still loading just as much as one that is playing -- more, in fact, since
+-- that is the one a stray pause kills.
+mod.has_peers = function ()
+	return net.connected_count() > 0
+end
+
+-- ...and whether they can actually receive a synchronised timescale yet.
+mod.peers_syncable = function ()
+	return net.all_peers_ready()
+end
+
+-- Both halves of "is anyone still on a buff card": we tell the others about
+-- ours, and ask about theirs. Parked for pause.lua for the same reason as
+-- above -- it must not load net.lua and get a second copy.
+mod.report_choosing = function (choosing)
+	net.set_local_choosing(choosing)
+end
+
+mod.peers_choosing = function (dt)
+	return net.any_peer_choosing(dt)
+end
+
+-- Same again for chain.lua, which is io_dofile'd and must not carry its own
+-- copy of net.lua either.
+--
+-- Two callers, and they cover different launches. This one is the mid-mission
+-- one -- the launcher's "End run & begin" -- where the bus is still up at the
+-- moment of the reset. The chain's own hop cannot use it: chain.launch runs
+-- from the hub by then, long after the game session and the bus are gone, so
+-- that announcement goes out from the complete_game_mode hook instead.
+mod.announce_hop = function (mission_name)
+	return net.announce_hop(mission_name)
+end
 _apply_moved_defaults()
 _init_loadouts()
 
@@ -829,6 +871,21 @@ end
 -- permanently would leak into every other reader of that table, this mod's and
 -- other mods' alike.
 mod:hook(MissionBuffsSelector, "create_buff_family_choice_for_player", function (func, self, player, num_choices)
+	-- The choke point. Every family card in the game is created here, so a
+	-- player whose family we are carrying is given it back instead of being
+	-- asked to choose again -- whatever asked.
+	--
+	-- Handling this at the spawn hook alone was not enough:
+	-- create_buff_family_choice_for_all walks human_players() and offers to
+	-- anyone without a family, which catches a client who has connected but not
+	-- yet spawned. Suppressing here covers that producer and any other.
+	--
+	-- Returning without calling func is the point -- the card must not be built
+	-- at all. A player we hold nothing for falls straight through.
+	if run.restore_family(self, player) then
+		return
+	end
+
 	local offered = buff_pool.offered_families()
 
 	-- Nothing switched off, or everything switched off: leave the engine alone.
@@ -941,6 +998,18 @@ mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self,
 		return func(self, player, is_respawn)
 	end
 
+	-- Ahead of every path below, including the ones that return immediately.
+	--
+	-- The original decides here whether to put a family card up, and for anyone
+	-- rejoining a run in progress the answer is yes -- they have no family in
+	-- this mission's data and the mission has already opened its choice. Setting
+	-- the carried family first makes that check answer no. See run.restore_family
+	-- for why this cannot wait for run.restore.
+	--
+	-- Safe for bots and for players we hold nothing for: run.restore_family keys
+	-- through _player_key, which answers nil for anything not human-controlled.
+	run.restore_family(self._mission_buffs_selector, player)
+
 	local handler = self._mission_buffs_handler
 	local ok, has_pool = pcall(handler.does_player_have_legendary_buffs_pool, handler, player)
 
@@ -1034,6 +1103,31 @@ mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_dat
 	-- the carried ones and additively, so the two cannot clobber each other.
 	local switched_off = buff_pool.apply_exclusions(exclude)
 
+	-- And every custom buff, if any connected peer has not proved it computed
+	-- the same network ids we did.
+	--
+	-- This is the enforcement half of the handshake in net.lua. Offering a
+	-- custom buff to a peer whose NetworkLookup lacks that id is a hard crash
+	-- on their machine, so the pool closes rather than gambling. It reopens by
+	-- itself the moment they identify -- there is nothing to undo.
+	local suppressed = 0
+
+	if not net.custom_buffs_safe() then
+		local map = custom_buffs.network_id_map() or {}
+
+		for i = 1, #map do
+			local name = string.match(map[i], "^([^=]+)=")
+
+			if name and not exclude[name] then
+				exclude[name] = true
+				suppressed = suppressed + 1
+			end
+		end
+
+		mod:error("a connected peer has not verified its custom buff ids - %d custom buff(s) suppressed this mission (/cw_peers)",
+			suppressed)
+	end
+
 	self._backend_buffs_to_exclude = exclude
 	self._backend_weighted_randomization = {
 		buff_family_weights = {},
@@ -1041,7 +1135,7 @@ mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_dat
 
 	mod:debug_log("skipped the hordes backend request; using even family weights;",
 		carried, "buff(s) already owned this run and", switched_off,
-		"switched off in the toggle menu excluded from the pools")
+		"switched off in the toggle menu, and", suppressed, "suppressed for an unverified peer, excluded from the pools")
 end)
 
 mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (self)
@@ -1533,6 +1627,17 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 		return
 	end
 
+	-- Consumed here whatever happens next, a loss included: a vote belongs to
+	-- the mission it was opened in, and one left behind would hand a later
+	-- picker three missions rolled for a run that is already over.
+	local voted_options = mod._vote_options
+	local voted_winner = mod._vote_winner
+	local voted_binding = mod._vote_binding
+
+	mod._vote_options = nil
+	mod._vote_winner = nil
+	mod._vote_binding = nil
+
 	local end_result = Managers.mechanism and Managers.mechanism:end_result()
 
 	if end_result ~= "won" then
@@ -1542,7 +1647,17 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 		return
 	end
 
-	local options = chain.roll_options(run.state().params)
+	-- What the party voted on, if they did. Rolling a fresh set here instead
+	-- would put three unrelated missions in front of the host and silently
+	-- discard the vote -- and the vote is the only thing the clients got a say
+	-- in, because during the mission is the only time there is a channel.
+	local options = voted_options
+	local default = voted_winner
+
+	if not options or #options == 0 then
+		options = chain.roll_options(run.state().params)
+		default = nil
+	end
 
 	if not options or #options == 0 then
 		mod:error("no eligible missions to continue the run with")
@@ -1562,12 +1677,28 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 	-- it: the state is already correct when the screen opens, so it no longer
 	-- matters whether the player clicks, clicks late, or never clicks at all.
 	-- Clicking a different card simply replaces the default.
-	run.state().next_mission = options[1]
+	run.state().next_mission = default or options[1]
 
-	mod:debug_log("defaulting to", options[1].mission_name, "until another card is chosen")
+	mod:debug_log("defaulting to", run.state().next_mission.mission_name,
+		default and "(the vote winner)" or "until another card is chosen")
+
+	-- The view is told which card, not left to infer it. It used to hardcode
+	-- the first one as selected, so a vote that won on card 3 opened a screen
+	-- claiming card 1 -- and any click at all replaced the winner.
+	local selected_index = 1
+
+	for i = 1, #options do
+		if options[i] == default then
+			selected_index = i
+
+			break
+		end
+	end
 
 	Managers.ui:open_view(RUN_SELECT_VIEW, nil, nil, nil, nil, {
 		options = options,
+		selected_index = selected_index,
+		locked = default ~= nil and voted_binding or false,
 	})
 end)
 
@@ -1677,11 +1808,27 @@ local function _update_pending_launch(dt)
 	if not state.pending_launch then
 		hub_settle_accum = 0
 
+		-- Cheap no-op unless it is actually held, which it only is between
+		-- queueing a launch and making it.
+		net.hold_admission(false)
+
 		return
 	end
 
 	local game_mode = Managers.state and Managers.state.game_mode
 	local game_mode_name = game_mode and game_mode:game_mode_name()
+
+	-- Shut the door as soon as we are in the hub, before the settle timer
+	-- rather than after it.
+	--
+	-- With SoloMourningstar the hub is a listen server on the same address the
+	-- party joined, so for the whole of this window a reconnecting client can
+	-- land here instead of in the mission we are about to launch. The client
+	-- re-arms itself if that happens, but not colliding at all is better than
+	-- recovering from it.
+	if game_mode_name == "hub" then
+		net.hold_admission(true)
+	end
 	local session = Managers.multiplayer_session
 	local mechanism = Managers.mechanism
 
@@ -1722,7 +1869,7 @@ end
 -- family, and the family-choice request that triggers.update fires skips any
 -- player who already has one -- so restoring first is what stops a continued
 -- run from re-prompting you to pick a family every mission.
-local function _update_run()
+local function _update_run(dt)
 	if not mod.is_host() then
 		return
 	end
@@ -1754,8 +1901,12 @@ local function _update_run()
 		end
 	end
 
+	-- Keeps being called until run.restore says everyone is in, not until it
+	-- first does something. A client reconnecting after a hop arrives minutes
+	-- after the host, and the single-shot version would have finished long
+	-- before they spawned.
 	if not restored_this_mission and run.should_restore() then
-		restored_this_mission = run.restore()
+		restored_this_mission = run.restore(dt)
 	end
 
 	-- Keep the carry-over snapshot fresh while the mission runs, rather than
@@ -1838,13 +1989,14 @@ end
 
 mod.update = function (dt)
 	_update_pending_launch(dt)
-	_update_run()
+	_update_run(dt)
 	_update_pending_pool_init(dt)
 	_reconcile_pause_hold()
 	_update_loadout_save(dt)
 	triggers.update(dt)
-	pause.update()
+	pause.update(dt)
 	custom_buffs.update(dt)
+	net.update(dt)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1901,6 +2053,265 @@ end
 mod.debug_end_mission_lost = function ()
 	_end_mission(false)
 end
+
+-- Arms a run without launching one.
+--
+-- _should_activate needs three things to take a mission over: run.is_launched(),
+-- the host role, and game_mode._is_server. chain.launch is only how the first
+-- of those usually gets set -- nothing requires it, and requiring it is what
+-- makes multiplayer testing awkward, because the chain cannot survive a
+-- session reset under Realms yet (see chain.lua's launch guard).
+--
+-- So: arm here, then start the mission with SoloPlay. The mod activates
+-- exactly as if the launcher had done it, and no session reset happens. That
+-- matters because SoloPlay launches under Realms are known good -- three clean
+-- ones during the port measurement -- while the chain's own path is the one
+-- that locked a machine.
+--
+-- Must be run in the Mourningstar, before the mission loads: activation is
+-- decided in _init_buff_system during mission init, and the flag has to be set
+-- by then. Arriving at the hub clears it (the hub branch of the same hook), so
+-- arm after you get there, not before.
+--
+-- Leaves run.state().params nil on purpose. chain.roll_options falls back to
+-- chain.current_params() when it is, which reads the difficulty off the
+-- mission actually being played -- more accurate here than anything this
+-- command could guess.
+-- Who is connected, whether they match, and whether custom buffs are live.
+--
+-- The question this answers is asked from both ends of a session, so it
+-- deliberately works the same in either role and needs no arguments.
+-- Open a vote on the next mission, host side.
+--
+-- Rolls the same three options the end screen would and puts them to the party
+-- while the mission is still being played -- which is not a stylistic choice.
+-- StateGameScore is a top-level game state, so the gameplay session and Realms'
+-- bus are both gone by the time the end-of-round screen appears. During the
+-- mission is the only window there is.
+--
+-- Takes an explicit command for now so it can be exercised without playing a
+-- mission to completion; the automatic trigger comes when the commit hook does.
+-- Resolve the open vote into the run's own next-mission slot.
+--
+-- This used to hand the winner straight to Realms with change_mechanism, on the
+-- theory that Realms would defer it, keep the party and skip the reconnect. It
+-- does not: Preparation only reaches its completing transition from the
+-- `waiting` phase, which only a host re-boot can set, so a bare mechanism change
+-- dead-ends in a loading screen that never resolves. chain.lua carries the
+-- reasoning. The hop is a re-host, and the clients come back to it.
+--
+-- So all this does now is decide which mission, and it decides it here rather
+-- than at the end screen because during the mission is the only time there is a
+-- channel to have voted over.
+--
+-- Returns a reason string when it declines, because every one of them is a thing
+-- worth seeing in a log rather than a silent no-op.
+local function _resolve_vote()
+	if not mod.is_host() then
+		return "not the host"
+	end
+
+	local options = mod._vote_options
+
+	if type(options) ~= "table" or #options == 0 then
+		return "no vote was opened"
+	end
+
+	local index, cast = net.vote_result()
+
+	if not index then
+		return "no vote is open"
+	end
+
+	local option = options[index]
+
+	if not option then
+		return "the winning option no longer exists"
+	end
+
+	mod:info("vote resolved: option %d (%s) with %d vote(s) cast",
+		index, tostring(option.mission_name), cast)
+
+	-- Left in mod._vote_options on purpose. The end screen reads all three back
+	-- so the picker shows the missions the party voted on, with this one
+	-- selected, instead of rolling a fresh unrelated set.
+	mod._vote_winner = option
+
+	-- Whether the picker may still be overridden.
+	--
+	-- Solo, the vote is a debug command and the picker is the real interface --
+	-- locking it would take the choice away from the only person making one.
+	-- With anyone else connected the vote *is* the decision, and a host quietly
+	-- clicking past it on a screen nobody else can see is the whole reason the
+	-- vote exists.
+	mod._vote_binding = net.connected_count() > 0
+
+	return nil
+end
+
+-- The last moment there is a bus.
+--
+-- complete_game_mode runs inside gameplay; StateGameScore is a top-level game
+-- state, so by the end-of-round screen MissionCleanupUtilies has disconnected
+-- the game session and Realms' mod network is gone with it. Anything the clients
+-- need to be told about what happens next has to be said here.
+--
+-- Two things are said: the vote is resolved, and the hop is announced. The
+-- announcement is not conditional on the vote -- a host who never opened one
+-- still re-hosts, and the clients still have to know to follow.
+--
+-- hook_safe: the original must run whatever happens here. Ending the mission is
+-- not ours to prevent.
+mod:hook_safe("GameModeManager", "complete_game_mode", function (self, reason, triggered_from_flow)
+	if not mod.has_authority() or not run.is_active() then
+		return
+	end
+
+	local declined = _resolve_vote()
+
+	if declined then
+		mod:info("no vote to resolve: %s", declined)
+	end
+
+	-- The name is for the clients' log line and echo only; the host is still
+	-- free to pick a different card on the end screen, and nothing on the client
+	-- side reads it back. What matters is that a drop is coming and it is ours.
+	local winner = mod._vote_winner
+
+	net.announce_hop(winner and winner.mission_name or nil)
+end)
+
+-- Resolve the vote on demand, so the first time this runs is a moment you chose
+-- rather than the end of a real mission.
+--
+-- Does not announce a hop: there is no hop until the mission ends, and telling
+-- clients to reconnect while everyone is still playing would drop them for
+-- nothing.
+mod:command("cw_vote_close", mod:localize("command_cw_vote_close"), function ()
+	local declined = _resolve_vote()
+
+	if declined then
+		mod:echo(string.format("Chaos Wastes at Home: %s", declined))
+
+		return
+	end
+
+	mod:echo(mod:localize("vote_closed", chain.mission_display_name(mod._vote_winner.mission_name)))
+end)
+
+mod:command("cw_vote_open", mod:localize("command_cw_vote_open"), function ()
+	if not mod.is_host() then
+		mod:echo(mod:localize("vote_host_only"))
+
+		return
+	end
+
+	local options = chain.roll_options(run.state().params)
+
+	if not options or #options == 0 then
+		mod:echo(mod:localize("vote_no_options"))
+
+		return
+	end
+
+	local labels = {}
+
+	for i = 1, #options do
+		labels[i] = chain.mission_display_name(options[i].mission_name)
+	end
+
+	mod._vote_options = options
+
+	if not net.start_vote(labels) then
+		mod:echo(mod:localize("vote_no_options"))
+
+		return
+	end
+
+	mod:echo(mod:localize("vote_opened"))
+
+	for _, line in ipairs(net.vote_report()) do
+		mod:echo(line)
+	end
+end)
+
+-- Cast a vote, either role. On the host it records locally; on a client it goes
+-- to the host, which owns the tally.
+mod:command("cw_vote", mod:localize("command_cw_vote"), function (index)
+	local ok, err = net.cast_vote(index)
+
+	if not ok then
+		mod:echo(string.format("Chaos Wastes at Home: %s", tostring(err)))
+
+		return
+	end
+
+	for _, line in ipairs(net.vote_report()) do
+		mod:echo(line)
+	end
+end)
+
+-- The tally so far, from either end.
+mod:command("cw_votes", mod:localize("command_cw_votes"), function ()
+	for _, line in ipairs(net.vote_report()) do
+		mod:echo(line)
+	end
+end)
+
+-- What the run is holding for whom.
+--
+-- The peer id is printed next to each person so this lines up with /cw_peers:
+-- the carry-over is keyed by account id (see run.lua's _player_key), which is
+-- the right key and the wrong one to read a log with.
+mod:command("cw_carry", mod:localize("command_cw_carry"), function ()
+	local state = run.state()
+	local any = false
+
+	mod:echo(string.format("Chaos Wastes at Home: run depth %d, restore %s",
+		run.depth(), state.restore_pending and "pending" or "not pending"))
+
+	for _, record in pairs(state.players) do
+		any = true
+
+		local count = 0
+		local names = {}
+
+		for buff_name, stacks in pairs(record.buffs) do
+			count = count + stacks
+			names[#names + 1] = stacks > 1
+				and string.format("%s x%d", buff_name, stacks)
+				or buff_name
+		end
+
+		table.sort(names)
+
+		mod:echo(string.format("  %s (peer %s): %d stack(s), family %s%s",
+			tostring(record.name), tostring(record.peer_id), count,
+			tostring(record.family), record.restored and " [restored]" or ""))
+
+		if #names > 0 then
+			mod:echo("    " .. table.concat(names, ", "))
+		end
+	end
+
+	if not any then
+		mod:echo("  nothing carried yet")
+	end
+end)
+
+mod:command("cw_peers", mod:localize("command_cw_peers"), function ()
+	for _, line in ipairs(net.report()) do
+		mod:echo(line)
+	end
+end)
+
+mod:command("cw_arm", mod:localize("command_cw_arm"), function ()
+	run.reset("arming a test run")
+	run.mark_launched()
+
+	mod:echo(mod:localize("arm_done"))
+	mod:info("run armed by /cw_arm - next mission will be taken over without going through chain.launch")
+end)
 
 mod:command("cw_win", mod:localize("command_cw_win"), mod.debug_end_mission_won)
 mod:command("cw_lose", mod:localize("command_cw_lose"), mod.debug_end_mission_lost)
@@ -1995,6 +2406,16 @@ mod:command("cw_status", mod:localize("command_cw_status"), function ()
 
 		return
 	end
+
+	-- The role first, and in chat rather than the log.
+	--
+	-- Activation announces itself with mod:info, which under DMF's defaults is
+	-- log-only -- so "did it take the mission over, and as what" was a question
+	-- you could only answer by reading a file. That is the wrong shape for a
+	-- question asked once per test launch, and it will be asked a lot more once
+	-- there is a client role to confirm as well.
+	mod:echo(string.format("Chaos Wastes at Home: active as %s (authority: %s)",
+		tostring(mod.role), tostring(mod.has_authority())))
 
 	local stats = triggers.stats()
 

@@ -1261,6 +1261,36 @@ local function _pool_names()
 	return names
 end
 
+-- The ids this mod assigned, in sorted name order: the thing two peers have to
+-- agree on before a custom buff can cross the wire.
+--
+-- Names alone are not enough. An id is `#buff_lookup + 1` at append time, so
+-- two machines with an identical mod version still disagree if some *other*
+-- mod appended to NetworkLookup.buff_templates first -- which makes the base
+-- offset a function of mod_load_order.txt. Comparing the assigned ids catches
+-- that; comparing a version string does not.
+--
+-- Returned as "name=id" strings rather than a hash so a mismatch names itself
+-- in the log. There are a dozen entries; the payload is nothing.
+custom_buffs.network_id_map = function ()
+	local network_lookup = rawget(_G, "NetworkLookup")
+	local buff_lookup = network_lookup and network_lookup.buff_templates
+
+	if not buff_lookup then
+		return nil
+	end
+
+	local entries = {}
+
+	for _, buff_name in ipairs(_all_template_names()) do
+		local id = rawget(buff_lookup, buff_name)
+
+		entries[#entries + 1] = string.format("%s=%s", buff_name, tostring(id))
+	end
+
+	return entries
+end
+
 custom_buffs.register_network_lookup = function ()
 	local ok = true
 

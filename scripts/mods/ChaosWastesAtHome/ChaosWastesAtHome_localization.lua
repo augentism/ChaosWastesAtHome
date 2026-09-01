@@ -93,10 +93,6 @@ return {
 		en = "End run & begin",
 		ru = "Завершить забег и начать",
 	},
-	launch_blocked_player_host = {
-		en = "Chaos Wastes at Home: a run cannot be launched from inside a player-hosted session yet. Remove Realms from mod_load_order.txt to play a chained run.",
-		ru = "Пустоши Хаоса у нас дома: забег пока нельзя запустить из сессии, размещённой игроком. Удалите Realms из mod_load_order.txt, чтобы играть в цепочке миссий.",
-	},
 	launch_hub_only = {
 		en = "Chaos Wastes at Home: a run can only be started from the Mourningstar or from one of this mod's own missions.",
 		ru = "Пустоши Хаоса у нас дома: забег можно начать только с Моунингстар.",
@@ -318,6 +314,12 @@ return {
 		en = "Buffs per mission",
 		ru = "Усиления за миссию",
 		["zh-cn"] = "单局增益获取上限",
+	},
+	sync_pause_multiplayer = {
+		en = "Pause everyone (experimental)",
+	},
+	sync_pause_multiplayer_description = {
+		en = "With other players connected, pausing normally stops only your own game and disconnects them, so it is skipped. This routes the pause through Realms' synchronised timescale instead, stopping everyone together. Experimental: that channel was built for level slow-motion and stopping the clock completely may still drop the session.",
 	},
 	pause_on_choice = {
 		en = "Pause while choosing",
@@ -657,6 +659,66 @@ return {
 	command_cw_give = {
 		en = "grant one buff by name - /cw_give [name or search text]",
 		ru = "выдать одно усиление по имени - /cw_give [имя или текст поиска]",
+	},
+	pause_disabled_multiplayer = {
+		en = "Chaos Wastes at Home: pausing is disabled while other players are connected -- stopping the clock disconnects them.",
+	},
+	picker_voted = {
+		en = "The party voted for %s.",
+	},
+	command_cw_vote_close = {
+		en = "resolve the open vote now and lock in the winning mission",
+	},
+	vote_closed = {
+		en = "Chaos Wastes at Home: the vote picked %s - it is selected when this mission ends.",
+	},
+	hop_incoming = {
+		en = "Chaos Wastes at Home: the host is moving the run to the next mission. You will be disconnected and rejoined automatically - stay put.",
+	},
+	hop_reconnecting = {
+		en = "Chaos Wastes at Home: the host's session has ended. Reconnecting...",
+	},
+	hop_rejoined = {
+		en = "Chaos Wastes at Home: back with the host.",
+	},
+	hop_no_address = {
+		en = "Chaos Wastes at Home: the host is moving to the next mission, but no join address is saved - rejoin from the Realms menu.",
+	},
+	hop_gave_up = {
+		en = "Chaos Wastes at Home: could not rejoin the host. Rejoin from the Realms menu when they are back.",
+	},
+	command_cw_vote_open = {
+		en = "roll the next mission options and put them to a vote",
+	},
+	command_cw_vote = {
+		en = "vote for the next mission - /cw_vote [1|2|3]",
+	},
+	command_cw_votes = {
+		en = "show the current vote",
+	},
+	vote_opened = {
+		en = "Chaos Wastes at Home: vote for the next mission with /cw_vote <number>",
+	},
+	vote_host_only = {
+		en = "Chaos Wastes at Home: only the host can open a vote.",
+	},
+	vote_no_options = {
+		en = "Chaos Wastes at Home: no eligible missions to vote on.",
+	},
+	command_cw_carry = {
+		en = "show what the run is carrying over, and for whom",
+	},
+	command_cw_peers = {
+		en = "show connected peers and whether their custom buff ids match",
+	},
+	net_peer_mismatch = {
+		en = "Chaos Wastes at Home: a connected player (%s) is running a different version or different buff ids. Custom buffs are suppressed until it matches - see /cw_peers.",
+	},
+	command_cw_arm = {
+		en = "arm a run without launching - then start the mission with SoloPlay",
+	},
+	arm_done = {
+		en = "Chaos Wastes at Home: run armed. Start a mission with SoloPlay and it will be taken over as if the launcher had started it.",
 	},
 	command_cw_modifiers = {
 		en = "list the modifiers and environment this mission actually loaded",

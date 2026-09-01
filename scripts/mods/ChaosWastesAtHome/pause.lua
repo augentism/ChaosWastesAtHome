@@ -97,6 +97,79 @@ pause.is_held = function ()
 	return state.hold == true
 end
 
+-- Other players are connected, so the clock is not ours to stop.
+--
+-- Scaling the gameplay timer to zero is a purely local act: it stops the
+-- host's simulation while every client keeps running. Realms only synchronises
+-- time scale through FlowCallbacks.set_host_gameplay_timescale, which a direct
+-- Managers.time:set_local_scale never reaches.
+--
+-- Measured 2026-08-31 with a real client attached: it does not merely desync,
+-- it *disconnects them* -- the host stops feeding the session and the client is
+-- dropped within seconds. So this is not a quality setting to weigh, it is a
+-- hard incompatibility, and the pause loses.
+--
+-- mod.has_peers is parked by the main script rather than reached for, so this
+-- file does not have to load net.lua and get a second copy of it. Absent (an
+-- older main script, a partial reload) reads as "no peers", which restores the
+-- previous solo behaviour rather than disabling the pause outright.
+local function _peers_connected()
+	if not mod.has_peers then
+		return false
+	end
+
+	local ok, peers = pcall(mod.has_peers)
+
+	return ok and peers or false
+end
+
+-- Writing the gameplay timer, by whichever route reaches everyone.
+--
+-- Managers.time:set_local_scale is purely local: it stops this machine and
+-- nothing else, which is why pausing used to drop clients. Realms does have a
+-- synchronised path -- it hooks FlowCallbacks.set_host_gameplay_timescale and
+-- forwards the value to every client, which applies it in
+-- AdaptiveClockHandlerClient.post_update -- so going through the flow callback
+-- pauses the whole party rather than just the host.
+--
+-- Behind a setting because it is unproven at scale 0. Realms built that channel
+-- for level-scripted slow motion, which plausibly never stops the clock dead,
+-- and a session where nothing simulates anywhere may still time out. Off by
+-- default: the safe behaviour is to not pause at all with peers connected.
+local function _peers_syncable()
+	if not mod.peers_syncable then
+		return false
+	end
+
+	local ok, syncable = pcall(mod.peers_syncable)
+
+	return ok and syncable or false
+end
+
+local function _set_scale(value)
+	local time = Managers.time
+
+	if not time then
+		return false
+	end
+
+	if _peers_connected() and _peers_syncable() and mod:get("sync_pause_multiplayer") then
+		local FlowCallbacks = rawget(_G, "FlowCallbacks")
+
+		if FlowCallbacks and FlowCallbacks.set_host_gameplay_timescale then
+			local ok = pcall(FlowCallbacks.set_host_gameplay_timescale, { scale = value })
+
+			if ok then
+				return true
+			end
+
+			mod:error("synced timescale write failed; falling back to a local one")
+		end
+	end
+
+	return pcall(time.set_local_scale, time, TIMER, value)
+end
+
 pause.resume = function ()
 	if not state.paused then
 		return
@@ -109,7 +182,7 @@ pause.resume = function ()
 	if time then
 		-- Restore whatever was there rather than forcing 1, so an existing
 		-- manual pause (TrueSoloQoL's /pause) survives a card opening over it.
-		pcall(time.set_local_scale, time, TIMER, state.saved_scale or 1)
+		_set_scale(state.saved_scale or 1)
 	end
 
 	state.saved_scale = nil
@@ -117,12 +190,58 @@ pause.resume = function ()
 	mod:debug_log("gameplay resumed")
 end
 
-pause.update = function ()
+
+local warned_about_peers = false
+
+pause.update = function (dt)
+	-- Everyone reports their own card, in either role. A client cannot pause
+	-- anything itself -- it takes the host's synchronised timescale -- but the
+	-- host cannot see a remote card, so this is how it learns.
+	local mine = _choice_is_up()
+
+	if mod.report_choosing then
+		pcall(mod.report_choosing, mine)
+	end
+
 	-- Two reasons, one pause. A buff choice honours the pause_on_choice option;
 	-- the hold does not, because the player opened that screen deliberately and
 	-- a menu that does not stop the world is a menu that gets you killed.
-	local choice_pause = mod:get("pause_on_choice") and _choice_is_up()
-	local want_pause = mod.manager and _is_server() and (choice_pause or state.hold)
+	--
+	-- "A choice is up" means ANYONE's, not just ours. Reading only the local
+	-- card meant the host resumed the world the instant it picked, which with a
+	-- synchronised pause drops everybody else straight back into the fight
+	-- mid-decision.
+	local others_choosing = false
+
+	if mod.peers_choosing then
+		local ok, result = pcall(mod.peers_choosing, dt)
+
+		others_choosing = ok and result or false
+	end
+
+	local choice_pause = mod:get("pause_on_choice") and (mine or others_choosing)
+	local blocked = _peers_connected()
+
+	if blocked and not warned_about_peers and (choice_pause or state.hold) then
+		warned_about_peers = true
+
+		mod:echo(mod:localize("pause_disabled_multiplayer"))
+		mod:info("pause suppressed: other players are connected and stopping the clock disconnects them")
+	end
+
+	-- Blocked only when we have no way to pause everyone.
+	--
+	-- The synced route needs every peer *ready*, not merely connected: Realms
+	-- drops the timescale message for any channel that has not finished its
+	-- handshake, so a client still loading gets nothing while the host stops
+	-- dead -- which kicks them on a black screen. Connected-but-not-ready
+	-- therefore blocks the pause exactly as an unsyncable peer would.
+	if blocked and _peers_syncable() and mod:get("sync_pause_multiplayer") then
+		blocked = false
+	end
+
+	local want_pause = mod.manager and _is_server() and not blocked
+		and (choice_pause or state.hold)
 
 	if want_pause == state.paused then
 		return
@@ -148,7 +267,7 @@ pause.update = function ()
 
 	state.saved_scale = scale
 
-	if not pcall(time.set_local_scale, time, TIMER, 0) then
+	if not _set_scale(0) then
 		state.saved_scale = nil
 
 		return

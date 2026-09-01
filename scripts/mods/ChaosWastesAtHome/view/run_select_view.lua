@@ -14,7 +14,13 @@ local RunSelectView = class("ChaosWastesRunSelectView", "BaseView")
 
 RunSelectView.init = function (self, settings, context)
 	self._options = context and context.options or {}
-	self._selected_index = nil
+
+	-- Which card the run is already pointing at, and whether that decision is
+	-- the party's rather than this player's. Both default to the old behaviour
+	-- when absent, so a redeployed view opened by a main script that predates
+	-- them still works.
+	self._selected_index = context and context.selected_index or nil
+	self._locked = context and context.locked or false
 
 	RunSelectView.super.init(self, definitions, settings, context)
 
@@ -36,6 +42,16 @@ RunSelectView.on_enter = function (self)
 	widgets_by_name.title.content.text = mod:localize("picker_title")
 	widgets_by_name.subtitle.content.text = mod:localize("picker_subtitle")
 
+	-- Clamped rather than trusted. A stale main script sends no index at all
+	-- (this view re-executes on every open, the script that opens it only on a
+	-- mod reload), and an index past the end would leave nothing looking
+	-- selected -- the failure this whole block exists to prevent.
+	local selected_index = tonumber(self._selected_index) or 1
+
+	if selected_index < 1 or selected_index > #self._options then
+		selected_index = 1
+	end
+
 	for i = 1, definitions.num_options do
 		local widget = widgets_by_name["option_" .. i]
 		local option = self._options[i]
@@ -44,15 +60,21 @@ RunSelectView.on_enter = function (self)
 			widget.content.title = chain.mission_display_name(option.mission_name)
 			widget.content.subtitle = option.difficulty_label or mod:localize("picker_option_subtitle")
 			widget.content.modifiers = option.modifiers_label or ""
-			widget.content.hotspot.pressed_callback = callback(self, "_cb_option_pressed", i)
+			-- Left nil when the party has already voted: a locked card that
+			-- still lights up under the cursor and swallows a click reads as
+			-- broken rather than as locked.
+			if not self._locked then
+				widget.content.hotspot.pressed_callback = callback(self, "_cb_option_pressed", i)
+			end
 
 			self:_set_preview(widget, chain.mission_preview_texture(option.mission_name))
 
-			-- The first card is already the run's selection when this view
-			-- opens, so it has to look selected. An invisible default would be
-			-- worse than none: the run would continue somewhere the player had
-			-- no idea they had agreed to.
-			widget.content.hotspot.is_selected = i == 1
+			-- Whichever card is already the run's selection when this view opens
+			-- has to look selected. Usually the first, but not when a vote
+			-- decided it -- and an invisible default is worse than none: the run
+			-- would continue somewhere the player had no idea they had agreed to,
+			-- which is exactly what showing card 1 over a vote winner did.
+			widget.content.hotspot.is_selected = i == selected_index
 
 			widget.visible = true
 		else
@@ -60,12 +82,13 @@ RunSelectView.on_enter = function (self)
 		end
 	end
 
-	local default_option = self._options[1]
+	local default_option = self._options[selected_index]
 
 	if default_option then
-		self._selected_index = 1
-		widgets_by_name.subtitle.content.text =
-			mod:localize("picker_selected", chain.mission_display_name(default_option.mission_name))
+		self._selected_index = selected_index
+		widgets_by_name.subtitle.content.text = mod:localize(
+			self._locked and "picker_voted" or "picker_selected",
+			chain.mission_display_name(default_option.mission_name))
 	end
 end
 
@@ -95,7 +118,7 @@ end
 RunSelectView._cb_option_pressed = function (self, index)
 	local option = self._options[index]
 
-	if not option then
+	if not option or self._locked then
 		return
 	end
 
