@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.9
+
+**Everyone in a session must be on this version.**
+
+- **Buff choices no longer offer buffs you are already carrying.** The offer
+  pools are rebuilt each mission, and carried buffs were not being taken out of
+  them -- so on the second mission onwards a card could contain a pick that did
+  nothing. Carried buffs are now removed from the pools, which also means a
+  run's pools deplete across the whole run rather than resetting every mission.
+
 ## 0.9.8
 
 **Everyone in a session must be on this version.** Use this rather than 0.9.7.

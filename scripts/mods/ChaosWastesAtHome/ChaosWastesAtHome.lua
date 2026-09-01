@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "0.9.8"
+mod.version = "0.9.9"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -1010,13 +1010,25 @@ mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self,
 	-- through _player_key, which answers nil for anything not human-controlled.
 	run.restore_family(self._mission_buffs_selector, player)
 
+	-- The original is what builds this player's offer pools, so anything that
+	-- has to be taken back out of them has to happen after it. Wrapped rather
+	-- than repeated at each exit below, because there are four of them and the
+	-- one that gets forgotten is the bug.
+	local function proceed(respawn)
+		local result = func(self, player, respawn)
+
+		run.trim_pools(self, player)
+
+		return result
+	end
+
 	local handler = self._mission_buffs_handler
 	local ok, has_pool = pcall(handler.does_player_have_legendary_buffs_pool, handler, player)
 
 	-- Only the call that would build the pool is held. Respawns and every later
 	-- call go straight through, so nothing else about spawn handling changes.
 	if not ok or has_pool then
-		return func(self, player, is_respawn)
+		return proceed(is_respawn)
 	end
 
 	-- Bots reach this hook too -- bot_gameplay.lua:36 calls the same
@@ -1031,7 +1043,7 @@ mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self,
 	-- a table key is "table index is nil" -- a hard crash, not a caught hook
 	-- error, because it happens in our own hook body rather than inside a pcall.
 	if not player.is_human_controlled or not player:is_human_controlled() then
-		return func(self, player, is_respawn)
+		return proceed(is_respawn)
 	end
 
 	-- unique_id() rather than account_id(): every player class has one and it is
@@ -1041,7 +1053,7 @@ mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self,
 	local id = player.unique_id and player:unique_id()
 
 	if not id then
-		return func(self, player, is_respawn)
+		return proceed(is_respawn)
 	end
 
 	local entry = pending_pool_init[id]
@@ -1065,7 +1077,7 @@ mod:hook(HordeMissionBuffsManager, "_manage_player_spawn", function (func, self,
 		_escape(abilities and abilities.combat or "unresolved"),
 		abilities and "" or " (timed out)")
 
-	return func(self, player, entry.is_respawn)
+	return proceed(entry.is_respawn)
 end)
 
 mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_data_initialization", function (func, self)

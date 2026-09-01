@@ -377,6 +377,95 @@ run.capture = function (quiet)
 end
 
 
+-- Take carried buffs out of the pools they would otherwise be offered from
+-- again.
+--
+-- The pools are rebuilt per mission and *popped* as buffs are handed out:
+-- init_legendary_buffs_pool_for_player fills the legendary one at spawn,
+-- set_buff_family_for_player fills the two family ones, and each offer removes
+-- what it took. Restoring goes through give_buff_to_player, which records the
+-- buff in buffs_received but pops nothing -- so every carried buff was still
+-- sitting in the pool and could be offered a second time. Picking it does not
+-- stack, so it is simply a dead choice.
+--
+-- Mutated in place through the public getters, which hand back the live tables.
+--
+-- Consequence worth knowing: the pools now deplete across a whole run rather
+-- than resetting every mission, which is the same shape as one long mission and
+-- is what carrying buffs forward is supposed to mean. triggers.grant_family
+-- already checks for an exhausted family pool and skips, so running dry late in
+-- a long run is handled rather than fatal.
+local function _drop_from_pool(pool, taken)
+	if type(pool) ~= "table" then
+		return 0
+	end
+
+	local removed = 0
+
+	for i = #pool, 1, -1 do
+		if taken[pool[i]] then
+			table.remove(pool, i)
+			removed = removed + 1
+		end
+	end
+
+	return removed
+end
+
+-- Idempotent, and called from two places for that reason: removing a name that
+-- is no longer there costs nothing, and the alternative is depending on whether
+-- the spawn hook's deferred pool init happened to land before run.restore.
+run.trim_pools = function (manager, player)
+	if not mod.is_host() then
+		return 0
+	end
+
+	local key = _player_key(player)
+	local record = key and state.players[key]
+
+	if not record or next(record.buffs) == nil then
+		return 0
+	end
+
+	local handler = manager and manager._mission_buffs_handler
+	local persistent = handler and handler._persistent_data
+
+	if not persistent then
+		return 0
+	end
+
+	local taken = record.buffs
+	local removed = 0
+
+	local ok_priority, priority = pcall(persistent.get_player_priority_family_buffs_available, persistent, player)
+
+	if ok_priority then
+		removed = removed + _drop_from_pool(priority, taken)
+	end
+
+	local ok_family, family = pcall(persistent.get_player_family_buffs_available, persistent, player)
+
+	if ok_family then
+		removed = removed + _drop_from_pool(family, taken)
+	end
+
+	-- Legendary is a map of filter category -> array, not one flat list.
+	local ok_legendary, legendary = pcall(persistent.get_legendary_buffs_available_for_player, persistent, player)
+
+	if ok_legendary and type(legendary) == "table" then
+		for _, category_pool in pairs(legendary) do
+			removed = removed + _drop_from_pool(category_pool, taken)
+		end
+	end
+
+	if removed > 0 then
+		mod:info("took %d already-carried buff(s) out of %s's offer pools",
+			removed, tostring(record.name))
+	end
+
+	return removed
+end
+
 -- Re-apply the carried family and buffs in the next mission.
 --
 -- Incremental, and it has to be: this used to run once and be finished, which
@@ -436,6 +525,10 @@ run.restore = function (dt)
 					count = count + 1
 				end
 			end
+
+			-- After granting, so the pools are trimmed against what the
+			-- player actually now has.
+			run.trim_pools(manager, player)
 
 			record.restored = true
 			restored = restored + count
