@@ -143,6 +143,7 @@ end
 run.arm_restore = function ()
 	state.restore_pending = true
 	state.restore_elapsed = 0
+	state.restore_accum = 0
 
 	-- Every record is owed again. Without this the flags from the last mission
 	-- would mark everyone as already done and the whole party would arrive with
@@ -236,6 +237,7 @@ run.reset = function (reason)
 	state.buffs = {}
 	state.players = {}
 	state.restore_elapsed = nil
+	state.restore_accum = nil
 	state.next_mission = nil
 	state.pending_launch = nil
 	state.restore_pending = nil
@@ -307,15 +309,26 @@ run.capture = function (quiet)
 
 			local family_ok, family = pcall(handler.get_buff_family_selected_by_player, handler, player)
 
-			-- Carried forward rather than replaced when this mission has nothing
-			-- to say about them. A client that is still loading, or that
-			-- disconnected mid-mission, reads as zero buffs here -- and
-			-- overwriting their record with that emptiness is how a hop would
-			-- quietly wipe the person it exists to protect.
+			-- Merged with what we already held, never replaced.
+			--
+			-- This mission's persistent data only knows what this mission gave
+			-- out, so for anyone who was absent when the buffs were handed back
+			-- it reads short -- or empty. Replacing on that reading is a wipe:
+			-- an earlier version only guarded the empty case, which meant a
+			-- rejoined player who then earned a single new buff had their whole
+			-- carried set overwritten by that one buff.
+			--
+			-- Highest count wins per buff, because within a run buffs only ever
+			-- accumulate. A lower reading is missing information, not a removal.
 			local previous = state.players[key]
 
-			if count == 0 and previous and next(previous.buffs) ~= nil then
-				record_buffs = previous.buffs
+			if previous then
+				for buff_name, stacks in pairs(previous.buffs) do
+					if (record_buffs[buff_name] or 0) < stacks then
+						record_buffs[buff_name] = stacks
+					end
+				end
+
 				count = 0
 
 				for _, stacks in pairs(record_buffs) do
@@ -466,25 +479,42 @@ run.trim_pools = function (manager, player)
 	return removed
 end
 
--- Re-apply the carried family and buffs in the next mission.
+-- Keep everyone holding what the run says they hold.
 --
--- Incremental, and it has to be: this used to run once and be finished, which
--- was true when the only player was the one whose machine it ran on. After a hop
--- the clients are still reconnecting and loading while the host is already
--- playing, so "restore everyone now" would restore the host and write the rest
--- off. Each player is applied when their unit appears and marked done, and the
--- pending flag only clears once nobody is outstanding.
+-- Written as a continuous reconciliation rather than a restore step, through
+-- two rounds of getting it wrong:
 --
--- HOW LONG to keep waiting is the only judgement call. A player who never comes
--- back would otherwise hold the snapshot armed for the whole mission -- harmless
--- in itself, but it also holds `restored_this_mission` false, so this keeps
--- being called. The deadline gives up on absentees and lets the mission get on.
+--  1. Once per mission was only ever right when the single player was the one
+--     whose machine it ran on. After a hop the clients are still reconnecting
+--     while the host is already playing, so "restore everyone now" restores the
+--     host and writes the rest off.
+--  2. Once per player, marked done with a flag, was still wrong. A player who
+--     drops and rejoins mid-mission is already marked done, so they come back
+--     with nothing -- and worse, the next capture reads their near-empty data
+--     and merges it, which used to overwrite their whole carried set.
+--
+-- So there is no "done". Every pass compares what each player holds against
+-- what the run says they should and hands over the difference, which is a no-op
+-- for anyone already whole. That makes it safe to run forever, and it covers
+-- the initial hand-back, a rejoin, and a reconnect that lands mid-mission with
+-- one mechanism instead of three.
+--
+-- The difference, rather than re-applying outright: the snapshot counts stacks,
+-- so blindly re-adding would double any buff that does stack.
+--
+-- The deadline below is only about the *pending* flag -- how long a mission
+-- waits before it stops considering itself mid-restore. Buffs are handed over
+-- whenever their owner turns up, deadline or not.
 local RESTORE_WAIT_SECONDS = 240
+
+-- How often the party is checked against the snapshot. Not per frame: this
+-- reads every player's buff data, which is what a capture costs.
+local RECONCILE_SECONDS = 1
 
 run.restore = function (dt)
 	local manager = mod.is_host() and mod.manager
 
-	if not manager or not run.should_restore() then
+	if not manager or not state.active or next(state.players) == nil then
 		return false
 	end
 
@@ -494,7 +524,25 @@ run.restore = function (dt)
 		return false
 	end
 
+	-- Throttled rather than run every frame: reconciling reads each player's
+	-- buff data, which is the same cost as a capture, and nothing here needs to
+	-- react faster than a person can notice.
+	state.restore_accum = (state.restore_accum or 0) + (dt or 0)
+
+	if state.restore_accum < RECONCILE_SECONDS then
+		return not state.restore_pending
+	end
+
+	state.restore_accum = 0
+
+	local handler = manager._mission_buffs_handler
+	local persistent = handler and handler._persistent_data
 	local selector = manager._mission_buffs_selector
+
+	if not persistent then
+		return false
+	end
+
 	local restored = 0
 	local people = 0
 
@@ -502,23 +550,36 @@ run.restore = function (dt)
 		local key = _player_key(player)
 		local record = key and state.players[key]
 
-		if record and not record.restored and player.player_unit then
-			-- Set the family first. Family buffs are drawn from it, and until it
-			-- is set the selector refuses to hand any out -- and the spawn
-			-- handler would otherwise offer a fresh family choice mid-run.
-			-- Usually already done by restore_family at spawn. Kept for the
-			-- path where that did not run -- a player who was present before
-			-- the snapshot was armed, so no spawn ever fired for them.
-			if record.family and not record.family_restored and selector then
-				pcall(selector.set_buff_family_for_player, selector, player, record.family, false)
+		if record and player.player_unit then
+			-- What they are short by, not "have they been done once".
+			--
+			-- A flag was wrong in both directions: it left a player who rejoined
+			-- mid-mission with nothing, because they had already been marked
+			-- done; and re-applying blindly instead would double any buff that
+			-- does stack, since the snapshot counts stacks. The difference
+			-- against what they actually hold right now is exact, and is a no-op
+			-- for anyone already whole -- so this can run as often as it likes.
+			local held = {}
+			local ok, current = pcall(persistent.get_buffs_given_to_player, persistent, player)
 
-				record.family_restored = true
+			if ok and current then
+				for buff_name, buff_data in pairs(current) do
+					held[buff_name] = buff_data and buff_data.stacks or 1
+				end
+			end
+
+			-- Family first. Family buffs are drawn from it, and until it is set
+			-- the selector refuses to hand any out.
+			if record.family and not record.family_restored and selector then
+				run.restore_family(selector, player)
 			end
 
 			local count = 0
 
 			for buff_name, stacks in pairs(record.buffs) do
-				for _ = 1, stacks do
+				local missing = stacks - (held[buff_name] or 0)
+
+				for _ = 1, missing do
 					Managers.event:trigger("mission_buffs_event_add_externally_controlled_to_player",
 						player, buff_name)
 
@@ -526,17 +587,22 @@ run.restore = function (dt)
 				end
 			end
 
-			-- After granting, so the pools are trimmed against what the
-			-- player actually now has.
-			run.trim_pools(manager, player)
+			if count > 0 then
+				run.trim_pools(manager, player)
+
+				restored = restored + count
+				people = people + 1
+
+				mod:info("gave %s (peer %s) %d buff stack(s) they were short, family %s",
+					tostring(record.name), tostring(record.peer_id), count, tostring(record.family))
+			end
 
 			record.restored = true
-			restored = restored + count
-			people = people + 1
-
-			mod:info("restored %d buff stack(s) for %s (peer %s), family %s",
-				count, tostring(record.name), tostring(record.peer_id), tostring(record.family))
 		end
+	end
+
+	if not state.restore_pending then
+		return true
 	end
 
 	-- Who is still owed. Absent players count -- that is the whole point of
@@ -549,27 +615,25 @@ run.restore = function (dt)
 		end
 	end
 
-	if restored > 0 or people > 0 then
+	if restored > 0 then
 		mod:info("restored %d buff stack(s) for %d player(s) in mission %d of the run; %d still to arrive",
 			restored, people, state.missions_completed + 1, outstanding)
 	end
 
 	if outstanding == 0 then
-		-- Consumed: the snapshot now describes this mission's live state, so it
-		-- must not be applied again until another transition arms it.
 		state.restore_pending = nil
 		state.restore_elapsed = nil
 
 		return true
 	end
 
-	state.restore_elapsed = (state.restore_elapsed or 0) + (dt or 0)
+	state.restore_elapsed = (state.restore_elapsed or 0) + RECONCILE_SECONDS
 
 	if state.restore_elapsed > RESTORE_WAIT_SECONDS then
 		state.restore_pending = nil
 		state.restore_elapsed = nil
 
-		mod:info("stopped waiting for %d player(s) to rejoin; their buffs stay in the snapshot for the next mission",
+		mod:info("stopped waiting for %d player(s) to arrive; they are still in the snapshot and will be topped up whenever they turn up",
 			outstanding)
 
 		return true
@@ -577,6 +641,5 @@ run.restore = function (dt)
 
 	return false
 end
-
 
 return run

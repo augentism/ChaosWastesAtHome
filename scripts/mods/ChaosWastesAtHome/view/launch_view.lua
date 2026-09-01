@@ -22,12 +22,19 @@ local run = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/run"
 
 local VIEW_NAME = "chaos_wastes_launch_view"
 
+-- An ordinary mod setting, which is the whole point: loadouts.snapshot walks
+-- every setting this mod owns, so the difficulty rides along in a saved loadout
+-- without this file knowing loadouts exist.
+local RUNG_SETTING = "launch_rung"
+
 local LaunchView = class("ChaosWastesLaunchView", "BaseView")
 
 LaunchView.init = function (self, settings, context)
 	self._definitions = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/launch_view_definitions")
 
 	self._rungs = difficulty.rungs()
+	-- Replaced by the saved rung in _init_slider; this is only what the field
+	-- holds until the widgets exist.
 	self._rung_index = 1
 	self._options = {}
 	self._selected_index = nil
@@ -96,13 +103,25 @@ LaunchView._init_slider = function (self)
 	local content = widget.content
 	local count = #self._rungs
 
+	-- Where the slider starts: whatever was picked last, not the bottom rung.
+	--
+	-- Stored as a rung key rather than an index (see difficulty.rung_key), and
+	-- read back through mod:get, which makes it an ordinary mod setting -- so it
+	-- travels in a loadout with everything else, no separate persistence.
+	--
+	-- Falls back to rung 1 when the saved key names a rung the game no longer
+	-- has, which is the honest answer: better the visible bottom of the ladder
+	-- than a silent guess at a neighbour.
+	self._rung_index = difficulty.rung_index_for_key(mod:get(RUNG_SETTING)) or 1
+	self._rung_key = difficulty.rung_key(self._rungs[self._rung_index])
+
 	content.min_value = 1
 	content.max_value = count
 	content.label = mod:localize("launch_difficulty")
 	content.step_size = count > 1 and 1 / (count - 1) or 1
-	content.slider_value = 0
-	content.applied_value = 1
-	content.value_text = self:_slider_text(1)
+	content.slider_value = count > 1 and (self._rung_index - 1) / (count - 1) or 0
+	content.applied_value = self._rung_index
+	content.value_text = self:_slider_text(self._rung_index)
 
 	self._slider_widget = widget
 end
@@ -111,6 +130,34 @@ LaunchView._slider_text = function (self, index)
 	local rung = self._rungs[index]
 
 	return string.format("%s  %s", mod:localize("launch_difficulty"), difficulty.describe(rung))
+end
+
+-- Moves the slider, the saved value and the rolled missions to a rung together.
+--
+-- `save` is false when the move came from outside -- a loadout being applied --
+-- so the view does not write back the value it was just handed.
+LaunchView._select_rung = function (self, index, save)
+	self._rung_index = index
+	self._rung_key = difficulty.rung_key(self._rungs[index])
+
+	local widget = self._slider_widget
+	local content = widget and widget.content
+
+	if content then
+		local count = #self._rungs
+
+		content.slider_value = count > 1 and (index - 1) / (count - 1) or 0
+		content.applied_value = index
+		content.value_text = self:_slider_text(index)
+	end
+
+	if save then
+		-- notify=false: nothing listens for this, and on_setting_changed would
+		-- run the mod's whole settings-changed path on a slider drag.
+		mod:set(RUNG_SETTING, self._rung_key, false)
+	end
+
+	self:_reroll()
 end
 
 -- Returns the rung index if the slider moved this frame, else nil.
@@ -327,9 +374,23 @@ LaunchView.update = function (self, dt, t, input_service)
 	local index = self:_read_slider()
 
 	if index and index ~= self._rung_index then
-		self._rung_index = index
+		self:_select_rung(index, true)
+	else
+		-- The loadout strip is on this same screen, and applying a loadout
+		-- writes every setting this mod owns -- the difficulty included. Nothing
+		-- tells the view that happened, so it watches the value rather than
+		-- being told, and a loadout switch moves the slider with everything
+		-- else. Without this the strip would silently disagree with the slider
+		-- sitting next to it.
+		local saved = mod:get(RUNG_SETTING)
 
-		self:_reroll()
+		if saved ~= self._rung_key then
+			local restored = difficulty.rung_index_for_key(saved)
+
+			if restored and restored ~= self._rung_index then
+				self:_select_rung(restored, false)
+			end
+		end
 	end
 
 	return LaunchView.super.update(self, dt, t, input_service)

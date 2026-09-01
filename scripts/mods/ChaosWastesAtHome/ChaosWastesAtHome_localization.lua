@@ -315,11 +315,11 @@ return {
 		ru = "Усиления за миссию",
 		["zh-cn"] = "单局增益获取上限",
 	},
-	sync_pause_multiplayer = {
-		en = "Pause everyone (experimental)",
+	protect_while_choosing = {
+		en = "Protect players while choosing",
 	},
-	sync_pause_multiplayer_description = {
-		en = "With other players connected, pausing normally stops only your own game and disconnects them, so it is skipped. This routes the pause through Realms' synchronised timescale instead, stopping everyone together. Experimental: that channel was built for level slow-motion and stopping the clock completely may still drop the session.",
+	protect_while_choosing_description = {
+		en = "While a buff card is on screen, that player cannot be hurt and enemies will not target them. Each player is protected only while their own card is up. This exists because pausing cannot work with other players connected - stopping the clock disconnects them - so without it, reading three cards means standing still in a fight. Safe to leave on alongside pausing; it simply has nothing to do when the game is already stopped.",
 	},
 	pause_on_choice = {
 		en = "Pause while choosing",
@@ -676,7 +676,16 @@ return {
 		en = "Chaos Wastes at Home: the host is moving the run to the next mission. You will be disconnected and rejoined automatically - stay put.",
 	},
 	hop_reconnecting = {
-		en = "Chaos Wastes at Home: the host's session has ended. Reconnecting...",
+		en = "Chaos Wastes at Home: the host's session has ended. Reconnecting... type /cw_rejoin_stop to give up.",
+	},
+	hop_cancelled = {
+		en = "Chaos Wastes at Home: stopped trying to rejoin.",
+	},
+	hop_nothing_to_cancel = {
+		en = "Chaos Wastes at Home: not trying to rejoin anyone.",
+	},
+	command_cw_rejoin_stop = {
+		en = "stop trying to rejoin the host",
 	},
 	hop_rejoined = {
 		en = "Chaos Wastes at Home: back with the host.",
@@ -686,6 +695,69 @@ return {
 	},
 	hop_gave_up = {
 		en = "Chaos Wastes at Home: could not rejoin the host. Rejoin from the Realms menu when they are back.",
+	},
+	settings_section_vote = {
+		en = "Voting on the next mission",
+	},
+	vote_auto = {
+		en = "Vote on the next mission automatically",
+	},
+	vote_auto_description = {
+		en = "Puts the next mission to a vote shortly after each mission starts, rather than waiting for the host to call one. The vote stays open for the whole mission and is settled when it ends. It has to happen while the mission is being played - once the end-of-round screen appears there is no longer any connection between players to vote over.",
+	},
+	vote_delay_seconds = {
+		en = "Vote opens after",
+	},
+	vote_delay_seconds_description = {
+		en = "The vote goes up near the start so there is a whole mission to think about it, rather than a decision to make while the map is at its busiest. The delay gives everyone time to finish loading in - a player who has not arrived yet cannot be sent the options. It waits a little longer on its own if someone is still connecting.",
+	},
+	vote_tiebreak = {
+		en = "When a vote ties",
+	},
+	vote_tiebreak_description = {
+		en = "Which mission wins when two or more finish level. With only two players every disagreement is a tie, so this decides more often than it sounds like it would. Whichever is chosen, a tie between missions nobody voted for falls to the leftmost card.",
+	},
+	vote_tiebreak_host = {
+		en = "The host decides",
+	},
+	vote_tiebreak_first = {
+		en = "Whoever got there first",
+	},
+	vote_tiebreak_random = {
+		en = "Pick at random",
+	},
+	vote_view_title = {
+		en = "Where does the run go next?",
+	},
+	vote_view_waiting = {
+		en = "The next mission has not been put to a vote yet. Leave this open and the choices will appear here.",
+	},
+	vote_view_subtitle = {
+		en = "Click a mission to vote for it - %s vote(s) so far. The mission with the most votes is the one that loads when this one ends.",
+	},
+	vote_view_voted = {
+		en = "You voted for %s - %s vote(s) so far. Click another to change your mind; nothing is decided until this mission ends.",
+	},
+	vote_auto_opened = {
+		en = "Chaos Wastes at Home: the next mission is up for a vote. Open the vote screen with your Vote keybind (or /cw_vote_view) any time during this mission.",
+	},
+	vote_none_open = {
+		en = "Chaos Wastes at Home: the vote screen is only available during a run's mission.",
+	},
+	vote_card_subtitle = {
+		en = "Pick where the run goes next - %s vote(s) cast so far",
+	},
+	vote_card_votes = {
+		en = "%s vote(s)  %s",
+	},
+	command_cw_vote_view = {
+		en = "open the vote screen for the next mission",
+	},
+	vote_keybind = {
+		en = "Open the vote screen",
+	},
+	vote_keybind_description = {
+		en = "Opens the next-mission vote while you are playing. You cannot be hurt or targeted while it is open, the same as when a buff card is on screen.",
 	},
 	command_cw_vote_open = {
 		en = "roll the next mission options and put them to a vote",
@@ -714,11 +786,14 @@ return {
 	net_peer_mismatch = {
 		en = "Chaos Wastes at Home: a connected player (%s) is running a different version or different buff ids. Custom buffs are suppressed until it matches - see /cw_peers.",
 	},
+	launch_peers_manual_rejoin = {
+		en = "Chaos Wastes at Home: starting the run restarts your session, so anyone connected has been disconnected. They could not be told in advance from here, so ask them to rejoin - the address has not changed.",
+	},
 	command_cw_arm = {
-		en = "arm a run without launching - then start the mission with SoloPlay",
+		en = "arm a run without launching - for taking over a mission started some other way",
 	},
 	arm_done = {
-		en = "Chaos Wastes at Home: run armed. Start a mission with SoloPlay and it will be taken over as if the launcher had started it.",
+		en = "Chaos Wastes at Home: run armed. The next mission you start by any means will be taken over as if the launcher had started it. You do not need this to start a normal run - use Begin Run.",
 	},
 	command_cw_modifiers = {
 		en = "list the modifiers and environment this mission actually loaded",

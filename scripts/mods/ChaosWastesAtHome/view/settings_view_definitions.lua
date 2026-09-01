@@ -21,6 +21,13 @@ local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHom
 -- down each column, so inserting a setting or a section cannot leave a stale
 -- offset behind it. That is the same reasoning as the derived card heights in
 -- the launcher and picker.
+--
+-- Nothing balances the columns automatically, so which section goes where is a
+-- manual decision and has to be revisited whenever a section grows. Voting was
+-- added to the left and pushed it off the bottom of the screen; it lives on the
+-- right now because that column had the room. Rough heights, in rows: a header
+-- is 34, everything else 44, plus 24 between sections -- if a column passes
+-- about eleven items it will start to overflow at 1080p.
 
 local ROW_W = 620
 local ROW_H = 44
@@ -44,7 +51,7 @@ local LAYOUT = {
 
 		{ kind = "header", key = "settings_section_buffs" },
 		{ kind = "check", id = "pause_on_choice" },
-		{ kind = "check", id = "sync_pause_multiplayer" },
+		{ kind = "check", id = "protect_while_choosing" },
 		{ kind = "check", id = "ignore_buff_family" },
 		{ kind = "slider", id = "starting_legendary_picks", min = 0, max = 12, step = 1 },
 		{ kind = "slider", id = "starting_family_buffs", min = 0, max = 24, step = 1 },
@@ -75,6 +82,20 @@ local LAYOUT = {
 		{ kind = "check", id = "time_enabled" },
 		{ kind = "slider", id = "time_interval", min = 0.5, max = 20, step = 0.5, decimals = 1 },
 		{ kind = "check", id = "events_enabled" },
+
+		{ kind = "header", key = "settings_section_vote" },
+		{ kind = "check", id = "vote_auto" },
+		{ kind = "slider", id = "vote_delay_seconds", min = 0, max = 120, step = 5, suffix = "s" },
+		{
+			kind = "cycle",
+			id = "vote_tiebreak",
+			values = { "host", "first", "random" },
+			labels = {
+				"vote_tiebreak_host",
+				"vote_tiebreak_first",
+				"vote_tiebreak_random",
+			},
+		},
 	},
 }
 

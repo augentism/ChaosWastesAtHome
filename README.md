@@ -1,18 +1,25 @@
 # Chaos Wastes at Home
 
-Turns **solo** Darktide into a Chaos Wastes–style run: start a crusade from the
+Turns Darktide into a Chaos Wastes–style run: start a crusade from the
 Mourningstar, pick a buff family when you spawn, earn Mortis Trials buffs as you
 play, and at the end of each mission choose one of three next missions. Your
 buffs carry over. The difficulty climbs every mission. Losing ends the run.
 
+Solo out of the box, and **playable with friends** through the Realms mod — see
+*Playing with other people* below.
+
 ## Requirements
 
 - **Darktide Mod Framework**
-- Nothing else. The mod launches its own solo sessions — SoloPlay is **no longer
+- Nothing else. The mod launches its own sessions — SoloPlay is **no longer
   required**, though it can stay installed without conflicting.
 
-Optional: **Tertium4Or5** if you want bots. Runs are solo with no team by
-default; see *Bots* below.
+Optional:
+
+- **Realms** (by deluxghost) to play a run with other people. Load it **above**
+  this mod in `mod_load_order.txt`.
+- **Tertium4Or5** if you want bots. Runs are solo with no team by default; see
+  *Bots* below.
 
 ## Install
 
@@ -35,7 +42,8 @@ default; see *Bots* below.
    switched on as sources.
 4. Finish the mission and the end screen offers **three next missions**. Pick one
    and you go straight there with your buffs intact. The first card is
-   pre-selected, so pressing continue keeps the run going.
+   pre-selected, so pressing continue keeps the run going. Playing with other
+   people, the party votes on this during the mission instead — see below.
 5. Each mission is one rung harder. Non-Havoc missions each roll a random
    **maelstrom** modifier. Havoc missions roll two modifiers, carry the Emperor's
    Fading Light, and scale their modifier loadout by rank exactly as real Havoc
@@ -47,6 +55,10 @@ default; see *Bots* below.
 The mod only takes over missions **you started from the launcher**. Ordinary
 solo play is left completely alone — no buff cards, no chaining. If you have
 SoloPlay installed and launch a mission with it, this mod stays out of the way.
+
+Joining someone else's run is the exception: a guest never used the launcher, so
+they follow whatever the host started. The mod still stays out of matchmade
+games entirely.
 
 ## The menu
 
@@ -61,7 +73,8 @@ One keybind, and what it opens depends on where you are:
 Whichever one you land on, the rest are tabs across the top of it. In a mission
 there are four — Start a Crusade, Rollable Buffs, Settings, Buffs Collected —
 and the game stays paused for as long as any of them is open, including while
-you move between them. In the Mourningstar there are three; Buffs Collected
+you move between them — except with other players connected, where pausing is
+skipped for the reason given below. In the Mourningstar there are three; Buffs Collected
 needs a run to have something to show.
 
 **Start a Crusade opened from inside a mission ends the run you are on.** It
@@ -69,6 +82,10 @@ counts as a loss and everything it collected is gone, then you go straight into
 the new mission — no defeat screen, no stop in the Mourningstar. The button
 reads *End run & begin* while a run is live so it is clear what it does. There
 is no confirmation step beyond that.
+
+There is a **second keybind for the vote screen**, which only matters with other
+people in your session. It opens during a mission and shows the three maps the
+run can go to next.
 
 **Rollable Buffs** lists every buff that can be rolled, grouped by family and by
 class, with its icon and real description. Almost everything is on by default;
@@ -85,30 +102,81 @@ recommended companion: it lets you choose which of your own characters take the
 bot slots, and can raise the team size. With bots enabled this mod does not touch
 bot spawning at all, so Tertium4Or5 behaves normally.
 
-## Solo only, deliberately
+## Playing with other people
 
-The mod refuses to run outside a singleplay session, and this is not
-configurable. The buff system sends network messages to every other player in the
-session, and a client without this mod has not registered them — enabling it in a
-hosted game would break other people's game, not just yours.
+**This mod was solo-only before 1.0.0 and no longer is.** Runs work with a full
+party through **Realms**, which lets players connect directly to each other.
+Everything below applies only when someone else is actually in your session;
+solo behaviour is unchanged.
+
+**Everyone must be running the same version of this mod.** Buffs are sent
+between machines by number, and the numbers only agree between identical
+versions — so the mod checks on connect and, if anyone does not match, withholds
+its own custom buffs from the whole session rather than risk crashing them.
+`/cw_peers` shows who has matched.
+
+**Everyone keeps their own buffs.** The host holds a snapshot of what every
+player is carrying and hands it back as they spawn into the next mission,
+including to someone who is still reconnecting minutes later.
+
+**The party votes on the next mission.** Shortly after each mission starts, three
+maps go up for a vote. Open the vote screen with its keybind, click the one you
+want, and change your mind as often as you like — nothing is decided until the
+mission ends. Everyone sees the running tally. What happens when it ties is a
+setting.
+
+**Moving to the next mission disconnects everyone briefly.** Starting a mission
+restarts the host's session — that is how the game itself does it, and there is
+no way around it. Players are warned first and rejoin automatically; the chat
+says what is happening.
+
+**The automatic rejoin is not reliable yet.** Moving a run on restarts the
+host's session twice in quick succession, and a player can land on the one that
+is already on its way out — usually the previous mission's end screen. It sorts
+itself out on the next attempt more often than not, but if someone ends up
+somewhere strange, **the fix is simply to rejoin from the Realms menu with the
+same address, and nothing is lost by doing it**: the host holds everyone's
+buffs, so they are handed straight back on arrival. Even quitting to desktop and
+coming back keeps them.
+
+`/cw_rejoin_stop` stops it trying, if the host has gone for good.
+
+**Pausing is off with other players connected.** Stopping the clock only stops
+the host's game and disconnects everyone else within seconds, so it is skipped.
+Instead, **anyone reading a buff card or the vote screen cannot be hurt and
+enemies will not target them**, so stopping to read is safe without stopping the
+world. That protection is per player and lasts exactly as long as their own
+screen is open.
 
 ## Options worth knowing
 
-Everything is in the mod options menu.
+Most settings live on the mod's own **Settings** tab, reachable from the menu.
+A few sit in the DMF mod options menu, marked below.
 
 | Option | Default | Notes |
 |---|---|---|
-| Open the Chaos Wastes menu | unbound | **Bind this first** |
-| Bring bots | off | On = the game's bots fill the squad; see above |
+| Open the Chaos Wastes menu *(mod options)* | unbound | **Bind this first** |
+| Open the vote screen *(mod options)* | unbound | Only useful with other players |
 | Ramp difficulty each mission | on | Off keeps the run at its starting difficulty |
-| Load Mortis assets | on | Needed for buff icons and effects; ~0.5s warm, ~3s on the first load after launching the game, once per run |
-| Extra seconds on the end screen | 30 | Solo end screens are very short by default |
+| Bring bots | off | On = the game's bots fill the squad; see above |
+| Pause while choosing | on | Freezes the game **and holds the card countdown**, so nothing is auto-picked. Off = stock 30s timer. **Skipped entirely when other players are connected** — it would disconnect them |
+| Protect players while choosing | on | While a buff card or the vote screen is up, that player cannot be hurt and enemies ignore them. This is what makes reading safe when pausing cannot be used |
 | Ignore buff families | off | Small buffs come from **every** family, not just the one you picked — ~70 instead of ~10. You still choose a family and still get its opening buff |
+| Starting card picks / family buffs | 0 / 0 | A hand dealt at the start of a run, once |
 | Custom buff frequency | 1 | How often the mod's own buffs come up, relative to the shipped categories |
-| Havoc theme circumstance chance | 50% | Hunting grounds / ventilation purge / toxic gas |
-| Buffs per mission | 3 legendary, 7 family | Per mission, not per run — deep runs stack up fast |
-| Pause while choosing | on | Freezes the game **and holds the card countdown**, so nothing is auto-picked. Off = stock 30s timer |
-| Debug logging | off | Turn on before reproducing a problem. Also enables a periodic custom-buff snapshot in the log |
+| Legendary card picks / Family buffs | 3 / 7 | Per mission, not per run — deep runs stack up fast |
+| Environment chance | 50% | Havoc only: hunting grounds / ventilation purge / toxic gas |
+| How buffs are earned | objective only | Objectives, kills, a timer and terror events can each be switched on as sources |
+| Vote on the next mission automatically | on | Off = only the host calling `/cw_vote_open` puts one up |
+| Vote opens after | 20s | Measured from the mission starting. It waits longer on its own if someone is still loading in |
+| When a vote ties | The host decides | Or *Whoever got there first*, or *Pick at random* |
+| Extra seconds on the end screen *(mod options)* | 30 | Solo end screens are very short by default |
+| Load Mortis assets *(mod options)* | on | Needed for buff icons and effects; ~0.5s warm, ~3s on the first load after launching the game, once per run |
+| Debug logging *(mod options)* | off | Turn on before reproducing a problem. Also enables a periodic custom-buff snapshot in the log |
+
+The difficulty you last started a run at is remembered, and is saved as part of
+a **loadout** along with everything above — switching loadouts on the start
+screen moves the difficulty slider too.
 
 There are also unbound keybinds under **Testing** to end a mission instantly as a
 win or a loss, for exercising the chain without playing a whole map.
@@ -153,6 +221,13 @@ nothing.
   end, which makes runs unloseable. The mod warns once in chat if it detects
   this. Turn that setting off for runs to work properly.
 - Buff budgets are per mission, so long runs get very strong. Tuning welcome.
+- **Multiplayer is new and less tested than solo.** The automatic rejoin between
+  missions is the weakest part — see above. Rejoining by hand always works and
+  costs nothing, because buffs are held by the host rather than by each player.
+- A player who drops and rejoins **during** a mission gets their buffs back on
+  the next one rather than immediately.
+- Nothing stops you sitting in the vote screen indefinitely while enemies cannot
+  touch you. Left as-is on purpose; it is your run.
 
 ## Reporting a problem
 
@@ -177,13 +252,28 @@ buff is misbehaving, the sequence of snapshots usually shows it directly.
 | Command | What it does |
 |---|---|
 | `/cw_menu` | Opens the right menu for where you are |
-| `/cw_launch` | The run launcher (Mourningstar only) |
+| `/cw_launch` | The run launcher (Mourningstar, or one of this mod's missions) |
 | `/cw_buffs` | The rollable-buffs menu |
 | `/cw_status` | Buffs granted this mission, plus any guard activity |
+| `/cw_modifiers` | What this mission is actually running — difficulty, circumstances, Havoc modifiers |
 | `/cw_buff [family\|legendary]` | Grant one now |
 | `/cw_give [name or search]` | Grant a specific buff; with no exact match it searches |
-| `/cw_verify` | Print the custom-buff snapshot now (it is also logged passively — see below) |
+| `/cw_verify` | Print the custom-buff snapshot now (it is also logged passively — see above) |
 | `/cw_win` / `/cw_lose` | End the current mission (testing) |
+| `/cw_arm` | Mark the next mission as a run, whatever starts it. You do not need this for a normal run |
+
+With other players connected:
+
+| Command | What it does |
+|---|---|
+| `/cw_vote_view` | The vote screen, same as the keybind |
+| `/cw_vote <number>` | Vote without opening the screen |
+| `/cw_votes` | The current tally in chat |
+| `/cw_vote_open` | Host: put the next mission to a vote now |
+| `/cw_vote_close` | Host: settle the vote early |
+| `/cw_peers` | Who is connected and whether their version matches |
+| `/cw_carry` | What the run is holding for each player |
+| `/cw_rejoin_stop` | Give up rejoining a host that is not coming back |
 
 ## Credits
 

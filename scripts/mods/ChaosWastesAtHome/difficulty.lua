@@ -88,6 +88,50 @@ difficulty.rungs = function ()
 	return rungs
 end
 
+-- A stable name for a rung, for saving which one was last picked.
+--
+-- Not the index into rungs(): that list is built from DangerSettings and the
+-- Havoc rank range, so a game patch adding a difficulty or shifting the Havoc
+-- ladder silently moves every index after it -- and the saved value would then
+-- select a different difficulty than the one it was saved from, with nothing to
+-- indicate anything had gone wrong. The two fields that actually identify a rung
+-- do not move.
+difficulty.rung_key = function (rung)
+	if type(rung) ~= "table" then
+		return nil
+	end
+
+	if rung.havoc_rank then
+		return string.format("havoc:%d", rung.havoc_rank)
+	end
+
+	if rung.challenge and rung.resistance then
+		return string.format("danger:%d:%d", rung.challenge, rung.resistance)
+	end
+
+	return nil
+end
+
+-- The index of a saved rung in the current ladder, or nil when it no longer
+-- exists -- a Havoc rank the game has dropped, for instance. nil rather than a
+-- guess: the caller falls back to its own default, which is safer than landing
+-- the player on a neighbouring difficulty they did not choose.
+difficulty.rung_index_for_key = function (key)
+	if type(key) ~= "string" then
+		return nil
+	end
+
+	local rungs = difficulty.rungs()
+
+	for i = 1, #rungs do
+		if difficulty.rung_key(rungs[i]) == key then
+			return i
+		end
+	end
+
+	return nil
+end
+
 -- Reads what the mission currently being played is set to.
 difficulty.current = function ()
 	local manager = Managers.state and Managers.state.difficulty

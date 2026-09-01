@@ -28,6 +28,7 @@ local RPC_OPTIONS = "cwah_options"
 local RPC_VOTE = "cwah_vote"
 local RPC_CHOOSING = "cwah_choosing"
 local RPC_HOP = "cwah_hop"
+local RPC_TALLY = "cwah_tally"
 
 -- Re-sent on a timer as well as on becoming available: Realms' bus comes up
 -- asynchronously after a peer connects, and a send into a channel that is not
@@ -54,7 +55,6 @@ if not state then
 		-- [peer_id] = os-free timestamp-less flag: is that peer still on a card
 		choosing = {},
 		local_choosing = false,
-		choosing_hold = 0,
 		-- Client side: an announced re-host we are waiting to follow.
 		hop = nil,
 		-- Host side: the ConnectionHost we have closed to joins, if any. The
@@ -227,13 +227,68 @@ local function _vote_counts(vote)
 	return counts
 end
 
+-- One ballot. The sequence is what makes "first past the post" possible: a
+-- changed vote takes a new number, because moving to another card is a fresh
+-- commitment to it, not a retroactive one.
+local function _record_vote(vote, voter, index)
+	vote.sequence = vote.sequence + 1
+	vote.votes[voter] = index
+	vote.order[voter] = vote.sequence
+end
+
+-- Host: push the running tally to everyone.
+--
+-- The host owns the count -- clients send their votes to it and hear nothing
+-- back -- so without this each player could only ever see their own choice, and
+-- a vote nobody can watch is not really a vote.
+--
+-- Sent on change rather than on a timer: a party produces a handful of votes per
+-- mission, so this is a few messages, not a stream. Dense array of exactly one
+-- entry per card, because a sparse table would arrive with holes and read as
+-- fewer options than were offered.
+local function _broadcast_tally()
+	local vote = state.vote
+
+	if not vote then
+		return
+	end
+
+	local realms = _realms()
+
+	if not realms then
+		return
+	end
+
+	local ok, available = pcall(realms.network_is_available)
+
+	if not ok or not available then
+		return
+	end
+
+	local counts = _vote_counts(vote)
+	local dense = {}
+
+	for i = 1, #vote.cards do
+		dense[i] = counts[i] or 0
+	end
+
+	realms.network_send(mod, RPC_TALLY, "others", {
+		token = vote.token,
+		counts = dense,
+	})
+end
+
 -- Host: open a vote on a rolled set of options.
 --
 -- Safe with no peers -- the host's own vote is the only one, and the result is
 -- whatever it picked. That is also the solo path, which is why nothing here is
 -- conditional on being in a session.
-net.start_vote = function (labels)
-	if type(labels) ~= "table" or #labels == 0 then
+-- `cards` is one table per option, not just a name: the vote view draws the same
+-- three mission cards the end screen does, and a client has no way to rebuild
+-- difficulty or modifier text from a display name alone. Mission art is the
+-- exception -- that resolves locally from MissionTemplates by mission_name.
+net.start_vote = function (cards)
+	if type(cards) ~= "table" or #cards == 0 then
 		return false
 	end
 
@@ -241,29 +296,62 @@ net.start_vote = function (labels)
 
 	state.vote = {
 		token = token,
-		labels = labels,
+		cards = cards,
 		votes = {},
+		-- When each voter last committed, as a rising counter. Only the
+		-- "first past the post" tiebreak reads it, but it has to be recorded as
+		-- votes arrive -- it cannot be reconstructed afterwards.
+		order = {},
+		sequence = 0,
 	}
 
-	mod:info("vote %d opened on %d option(s): %s", token, #labels, table.concat(labels, " | "))
+	local names = {}
+
+	for i = 1, #cards do
+		names[i] = tostring(cards[i].label)
+	end
+
+	mod:info("vote %d opened on %d option(s): %s", token, #cards, table.concat(names, " | "))
 
 	local realms = _realms()
 
 	if realms then
 		realms.network_send(mod, RPC_OPTIONS, "others", {
 			token = token,
-			labels = labels,
+			cards = cards,
 		})
 	end
+
+	-- Zeros, immediately. A client that has the cards but no tally would show
+	-- blank counts until the first vote landed, which reads as broken rather
+	-- than as empty.
+	_broadcast_tally()
 
 	return true
 end
 
--- Host: the winning index, and whether anyone actually voted.
+-- Host: the winning index, how many votes were cast, and how a tie was settled.
 --
--- Ties and an empty ballot both fall to option 1 rather than failing. A run
--- that stalls because nobody pressed a button is worse than a run that picks
--- the first mission on the card.
+-- Three rules, because which one feels fair depends on the table and none of
+-- them is obviously right. The setting picks:
+--
+--   host   -- the host's own ballot wins if it is among the leaders. Explainable
+--             and stable, but with two players every split is a host win.
+--   first  -- whichever tied mission reached the winning count first. Rewards
+--             deciding early rather than who you are; needs the arrival order,
+--             which is why votes are numbered as they land.
+--   random -- an even coin among the tied. Nobody has an edge, at the cost of
+--             the same votes not always giving the same mission.
+--
+-- All three fall back to the leftmost card, so there is always an answer.
+--
+-- Not left to iteration order, which is what this used to be: `counts` only
+-- holds indices somebody voted for, so with card 1 unvoted the remaining keys
+-- can sit in LuaJIT's hash part where order is not guaranteed. A tie could
+-- resolve differently on different runs with nothing to explain it.
+--
+-- An empty ballot falls to option 1. A run that stalls because nobody pressed
+-- anything is worse than a run that picks the first card.
 net.vote_result = function ()
 	local vote = state.vote
 
@@ -272,18 +360,78 @@ net.vote_result = function ()
 	end
 
 	local counts = _vote_counts(vote)
-	local best, best_count = 1, -1
 	local cast = 0
+	local best_count = 0
 
-	for index, count in pairs(counts) do
+	-- Over the cards, not over the counts: every option is considered whether or
+	-- not anybody voted for it, in a fixed order.
+	for i = 1, #vote.cards do
+		local count = counts[i] or 0
+
 		cast = cast + count
 
 		if count > best_count then
-			best, best_count = index, count
+			best_count = count
 		end
 	end
 
-	return best, cast
+	if best_count == 0 then
+		return 1, 0, nil
+	end
+
+	local leaders = {}
+
+	for i = 1, #vote.cards do
+		if (counts[i] or 0) == best_count then
+			leaders[#leaders + 1] = i
+		end
+	end
+
+	if #leaders == 1 then
+		return leaders[1], cast, nil
+	end
+
+	local rule = mod:get("vote_tiebreak") or "host"
+
+	if rule == "host" then
+		local host_choice = vote.votes.host
+
+		if host_choice and (counts[host_choice] or 0) == best_count then
+			return host_choice, cast, "tied - settled by the host's vote"
+		end
+	elseif rule == "random" then
+		return leaders[math.random(#leaders)], cast, "tied - settled at random"
+	elseif rule == "first" then
+		-- When each tied mission *reached* this count: the highest sequence
+		-- among its current voters, since that is the vote that completed it.
+		-- Earliest wins.
+		local best_leader, best_seq
+
+		for i = 1, #leaders do
+			local index = leaders[i]
+			local reached = 0
+
+			for voter, choice in pairs(vote.votes) do
+				if choice == index then
+					local seq = vote.order[voter] or 0
+
+					if seq > reached then
+						reached = seq
+					end
+				end
+			end
+
+			if not best_seq or reached < best_seq then
+				best_leader, best_seq = index, reached
+			end
+		end
+
+		if best_leader then
+			return best_leader, cast, "tied - settled by which filled up first"
+		end
+	end
+
+	return leaders[1], cast, "tied - settled by card order"
 end
 
 -- Either role: record a choice. On the host that is a local vote; on a client
@@ -315,6 +463,10 @@ net.cast_vote = function (index)
 
 		realms.network_send(mod, RPC_VOTE, "all", { token = vote.token, index = index })
 
+		-- Kept locally too. A client never hears the tally back, so without this
+		-- its own vote would leave no trace on its own screen.
+		vote.choice = index
+
 		return true
 	end
 
@@ -325,13 +477,103 @@ net.cast_vote = function (index)
 		return false, "no vote is open"
 	end
 
-	if index < 1 or index > #vote.labels then
+	if index < 1 or index > #vote.cards then
 		return false, "no such option"
 	end
 
-	vote.votes.host = index
+	_record_vote(vote, "host", index)
+
+	_broadcast_tally()
 
 	return true
+end
+
+-- The tally as an index -> count array, for the vote view's cards.
+--
+-- Both roles. The host owns the real tally; a client only knows its own choice,
+-- so it reports that as a single vote rather than showing nothing. That is
+-- honest about what a client can see -- it has no channel that carries the
+-- others' votes back -- and still confirms the click landed.
+net.vote_counts = function ()
+	if mod.role == "client" then
+		local client_vote = state.client_vote
+
+		if not client_vote then
+			return {}
+		end
+
+		-- The host's numbers when we have them. Our own vote only until the
+		-- first tally arrives, so a click shows something immediately rather
+		-- than appearing to do nothing for a round trip.
+		if client_vote.counts then
+			return client_vote.counts
+		end
+
+		local counts = {}
+
+		if client_vote.choice then
+			counts[client_vote.choice] = 1
+		end
+
+		return counts
+	end
+
+	local vote = state.vote
+
+	if not vote then
+		return {}
+	end
+
+	return _vote_counts(vote)
+end
+
+-- Forget the previous mission's vote.
+--
+-- Called when a mission starts, on both roles. Without it the old cards sat in
+-- state.vote until a new vote replaced them, and the vote screen opened on the
+-- mission the party had already played -- the token had moved on but nothing had
+-- cleared what it pointed at.
+--
+-- At the start rather than at teardown on purpose: the end-of-round picker reads
+-- mod._vote_options and mod._vote_winner, which are resolved during
+-- complete_game_mode and consumed by the end screen. Clearing on the way out
+-- would race that.
+net.reset_vote = function ()
+	state.vote = nil
+	state.client_vote = nil
+end
+
+-- This player's own choice in the running vote, or nil.
+--
+-- Derived rather than remembered by the screen, so a vote cast with /cw_vote
+-- shows as selected too -- and so reopening the screen still shows what you
+-- picked instead of looking as though you had not voted.
+net.my_vote = function ()
+	if mod.role == "client" then
+		return state.client_vote and state.client_vote.choice
+	end
+
+	return state.vote and state.vote.votes.host
+end
+
+-- Which round is running, or nil. The vote screen watches this so it can fill
+-- itself in if the vote opens while it is already on screen.
+net.vote_token = function ()
+	if mod.role == "client" then
+		return state.client_vote and state.client_vote.token
+	end
+
+	return state.vote and state.vote.token
+end
+
+-- The options as the vote view needs them, from whichever side is asking. Empty
+-- when no vote is open, which the vote screen shows rather than refuses.
+net.vote_cards = function ()
+	if mod.role == "client" then
+		return state.client_vote and state.client_vote.cards or {}
+	end
+
+	return state.vote and state.vote.cards or {}
 end
 
 net.vote_report = function ()
@@ -345,8 +587,8 @@ net.vote_report = function ()
 			return { "no vote is open" }
 		end
 
-		for i = 1, #client_vote.labels do
-			lines[#lines + 1] = string.format("  %d. %s", i, tostring(client_vote.labels[i]))
+		for i = 1, #client_vote.cards do
+			lines[#lines + 1] = string.format("  %d. %s", i, tostring(client_vote.cards[i].label))
 		end
 
 		lines[#lines + 1] = "vote with /cw_vote <number>"
@@ -360,37 +602,38 @@ net.vote_report = function ()
 
 	local counts = _vote_counts(vote)
 
-	for i = 1, #vote.labels do
+	for i = 1, #vote.cards do
 		lines[#lines + 1] = string.format("  %d. %s -- %d vote(s)",
-			i, tostring(vote.labels[i]), counts[i] or 0)
+			i, tostring(vote.cards[i].label), counts[i] or 0)
 	end
 
-	local winner, cast = net.vote_result()
+	local winner, cast, note = net.vote_result()
 
-	lines[#lines + 1] = string.format("leading: %d (%s), %d vote(s) cast",
-		winner, tostring(vote.labels[winner]), cast)
+	lines[#lines + 1] = string.format("leading: %d (%s), %d vote(s) cast%s",
+		winner, tostring(vote.cards[winner] and vote.cards[winner].label), cast,
+		note and (" - " .. note) or "")
 
 	return lines
 end
 
 local function _on_options(sender_peer_id, payload)
-	if type(payload) ~= "table" or type(payload.labels) ~= "table" then
+	if type(payload) ~= "table" or type(payload.cards) ~= "table" then
 		return
 	end
 
 	state.client_vote = {
 		token = payload.token,
-		labels = payload.labels,
-		count = #payload.labels,
+		cards = payload.cards,
+		count = #payload.cards,
 	}
 
 	mod:info("vote %s opened by the host on %d option(s)",
-		tostring(payload.token), #payload.labels)
+		tostring(payload.token), #payload.cards)
 
 	mod:echo(mod:localize("vote_opened"))
 
-	for i = 1, #payload.labels do
-		mod:echo(string.format("  %d. %s", i, tostring(payload.labels[i])))
+	for i = 1, #payload.cards do
+		mod:echo(string.format("  %d. %s", i, tostring(payload.cards[i].label)))
 	end
 end
 
@@ -411,97 +654,49 @@ local function _on_vote(sender_peer_id, payload)
 
 	local index = tonumber(payload.index)
 
-	if not index or index < 1 or index > #vote.labels then
+	if not index or index < 1 or index > #vote.cards then
 		return
 	end
 
-	vote.votes[sender_peer_id] = index
+	_record_vote(vote, sender_peer_id, index)
 
 	mod:info("%s voted for %d (%s)", tostring(sender_peer_id), index,
-		tostring(vote.labels[index]))
+		tostring(vote.cards[index] and vote.cards[index].label))
+
+	_broadcast_tally()
+end
+
+local function _on_tally(sender_peer_id, payload)
+	local client_vote = state.client_vote
+
+	if not client_vote or type(payload) ~= "table" or type(payload.counts) ~= "table" then
+		return
+	end
+
+	-- A tally for a round we are not on is a message that overtook its own
+	-- options, or arrived after we moved on. Either way it describes a different
+	-- set of cards than the ones on screen.
+	if payload.token ~= client_vote.token then
+		return
+	end
+
+	client_vote.counts = payload.counts
 end
 
 -- ---------------------------------------------------------------------------
 -- Who is still choosing a buff
 -- ---------------------------------------------------------------------------
 --
--- The pause used to read only the local card, so the host resumed the world the
--- moment it picked -- with a synchronised pause that means everyone else is
--- suddenly choosing under fire. Each peer reports whether its own card is up
--- and the host holds the pause until nobody's is.
+-- Each peer reports whether its own card is up, and the host acts on it.
+--
+-- Built for the synchronised pause, which is gone. It survives that because
+-- choice_shield.lua needs exactly the same fact for a better reason: the host
+-- has to know whose card is up in order to make that person untargetable while
+-- they read it. The pause could only ever stop the whole world; this protects
+-- one player at a time, which is what was actually wanted.
 --
 -- Reported on change rather than per frame: this is two or three messages per
 -- card, not sixty a second.
-
--- Longest the party can be held for someone else's card.
---
--- The card resolves itself on a timeout, so this should never fire. It exists
--- because "should never" and a frozen session are a bad pair, and a client that
--- crashes mid-choice never sends its "done" -- without a cap the rest of the
--- party would be stopped until they noticed and quit.
-local CHOOSING_HOLD_MAX = 60
-
-net.set_local_choosing = function (choosing)
-	choosing = choosing and true or false
-
-	if choosing == state.local_choosing then
-		return
-	end
-
-	state.local_choosing = choosing
-
-	local realms = _realms()
-
-	if not realms then
-		return
-	end
-
-	local ok, available = pcall(realms.network_is_available)
-
-	if not ok or not available then
-		return
-	end
-
-	realms.network_send(mod, RPC_CHOOSING, "all", { choosing = choosing })
-end
-
--- Host: is anyone else still on a card?
-net.any_peer_choosing = function (dt)
-	local any = false
-
-	for _, choosing in pairs(state.choosing) do
-		if choosing then
-			any = true
-
-			break
-		end
-	end
-
-	if not any then
-		state.choosing_hold = 0
-
-		return false
-	end
-
-	state.choosing_hold = state.choosing_hold + (dt or 0)
-
-	if state.choosing_hold > CHOOSING_HOLD_MAX then
-		-- Give up rather than hold the party indefinitely. Cleared outright so
-		-- this cannot re-trigger every frame from the same stuck peer.
-		for peer_id in pairs(state.choosing) do
-			state.choosing[peer_id] = nil
-		end
-
-		state.choosing_hold = 0
-
-		mod:error("held the pause for %ds waiting on another player's buff choice - giving up",
-			CHOOSING_HOLD_MAX)
-
-		return false
-	end
-
-	return true
-end
 
 local function _on_choosing(sender_peer_id, payload)
 	if type(payload) ~= "table" then
@@ -511,8 +706,23 @@ local function _on_choosing(sender_peer_id, payload)
 	state.choosing[sender_peer_id] = payload.choosing and true or false
 end
 
--- A peer that leaves is no longer choosing. Without this a disconnect during a
--- card would hold the pause until the cap above expired.
+-- Is one specific peer on a card? Who, not merely whether anyone is: the shield
+-- protects the person reading, and nobody else.
+net.peer_choosing = function (peer_id)
+	return state.choosing[peer_id] == true
+end
+
+-- Forget a peer that has gone.
+--
+-- Written for the synchronised pause and then never called, which left every
+-- peer this session ever saw listed in /cw_peers forever. Harmless to the buff
+-- gate -- custom_buffs_safe only asks about peers Realms currently reports -- but
+-- a support command that lists people who left an hour ago is worse than no
+-- command.
+--
+-- Called from the sweep in net.update rather than from a disconnect hook: Realms
+-- owns the disconnect callback and this mod does not, so comparing against its
+-- peer list is the reachable answer.
 net.forget_peer = function (peer_id)
 	state.choosing[peer_id] = nil
 	state.peers[peer_id] = nil
@@ -554,6 +764,17 @@ local HOP_ARMED_MAX = 900
 local HOP_FIRST_DELAY = 5
 local HOP_RETRY_SECONDS = 6
 local HOP_MAX_ATTEMPTS = 20
+
+-- How long attached-and-quiet counts as arrived when there is no game mode to
+-- read. A preparation lobby has none, and neither does a level still loading --
+-- the two are indistinguishable at a glance, so this waits long enough for a
+-- load to resolve into something and then calls it done.
+local HOP_SETTLE_SECONDS = 8
+
+-- A hub landing re-arms rather than finishing, which is right but must not be
+-- unbounded: without a cap, bouncing in and out of the host's Mourningstar
+-- resets the chase clock every time and the hop never expires on its own.
+local HOP_MAX_REARMS = 3
 
 -- Are we still attached to a Realms host right now?
 --
@@ -790,12 +1011,56 @@ local function _update_hop(dt)
 			return
 		end
 
+		-- The end-of-round screen is not somewhere to arrive.
+		--
+		-- If the host is slower through it than we are, a retry can succeed
+		-- against the session it has not finished leaving -- and that session is
+		-- about to be destroyed. It has no game mode, so it looks exactly like a
+		-- lobby to the check below, and calling it arrival disarms the rejoin
+		-- just before the drop that actually matters.
+		--
+		-- So it re-arms instead, like the Mourningstar does: wait here, and
+		-- chase again when this session goes.
+		if mod.end_screen_up and mod.end_screen_up() then
+			hop.attached_for = 0
+			hop.waiting_for_drop = true
+
+			if not hop.saw_end_screen then
+				hop.saw_end_screen = true
+
+				mod:info("rejoined into the end-of-round screen - that session is ending, waiting for the real one")
+			end
+
+			return
+		end
+
+		hop.attached_for = (hop.attached_for or 0) + (dt or 0)
+
 		local game_mode_name = _current_game_mode_name()
 
 		if not game_mode_name then
-			-- Mid-load. "Which session did we land in" is not answerable yet,
-			-- and answering it early is how the hub gets mistaken for the
-			-- mission.
+			-- No game mode means one of two things and they look identical: a
+			-- level still loading, or a preparation lobby. Waiting a moment
+			-- tells them apart, because a load resolves into something and a
+			-- lobby does not.
+			--
+			-- Staying armed forever was the bug. Sitting in the host's lobby
+			-- left the hop live for its whole fifteen-minute cap, so when the
+			-- host later quit -- an ordinary thing to do from a lobby -- a hop
+			-- that had already succeeded fired a reconnect storm at an address
+			-- with nobody on it. Being attached to the host IS the arrival,
+			-- whatever screen it happens on.
+			if hop.attached_for < HOP_SETTLE_SECONDS then
+				return
+			end
+
+			mod:info("rejoined the host after %d attempt(s) - no mission yet, so this is a lobby",
+				hop.attempts)
+
+			mod:echo(mod:localize("hop_rejoined"))
+
+			state.hop = nil
+
 			return
 		end
 
@@ -813,10 +1078,21 @@ local function _update_hop(dt)
 		-- which should stop this being reachable at all; this is the half that
 		-- does not depend on the host's timing.
 		if game_mode_name == "hub" or game_mode_name == "prologue_hub" then
-			if not hop.landed_in_hub then
-				hop.landed_in_hub = true
+			hop.rearms = (hop.rearms or 0) + 1
 
+			if hop.rearms == 1 then
 				mod:info("reconnected into the host's Mourningstar rather than the next mission - staying armed for the real hop")
+			end
+
+			if hop.rearms > HOP_MAX_REARMS then
+				-- Attached, in the Mourningstar, and no mission has come. That
+				-- is a party sitting in the hub, not a hop in progress.
+				mod:info("in the host's Mourningstar with no mission coming - treating the hop as done")
+				mod:echo(mod:localize("hop_rejoined"))
+
+				state.hop = nil
+
+				return
 			end
 
 			hop.waiting_for_drop = true
@@ -834,6 +1110,7 @@ local function _update_hop(dt)
 	end
 
 	-- Detached. Only now does the chase clock run -- see HOP_WINDOW.
+	hop.attached_for = 0
 	hop.elapsed = hop.elapsed + (dt or 0)
 
 	if hop.elapsed > HOP_WINDOW then
@@ -894,6 +1171,26 @@ local function _update_hop(dt)
 	if hop.attempts >= HOP_MAX_ATTEMPTS then
 		_give_up_hop("out of attempts")
 	end
+end
+
+-- Stop trying to rejoin.
+--
+-- This existed, unused, and was removed as dead code -- and then a host quit
+-- from a lobby and left somebody retrying against an address with nobody on it,
+-- which is exactly what it was for. Wired to /cw_rejoin_stop now, and named in
+-- the message that appears when reconnecting starts, so it can be found at the
+-- moment it is wanted rather than looked up afterwards.
+net.cancel_hop = function (why)
+	if not state.hop then
+		return false
+	end
+
+	mod:info("cancelled the pending rejoin: %s (%d attempt(s))",
+		tostring(why), state.hop.attempts)
+
+	state.hop = nil
+
+	return true
 end
 
 -- Host: shut the Mourningstar lobby while a launch is pending.
@@ -982,18 +1279,6 @@ net.hold_admission = function (holding)
 	return true
 end
 
--- Client: cancel a pending follow. The host changed its mind, or the run ended.
-net.cancel_hop = function (why)
-	if not state.hop then
-		return false
-	end
-
-	mod:info("cancelled the pending hop: %s", tostring(why))
-
-	state.hop = nil
-
-	return true
-end
 
 -- ---------------------------------------------------------------------------
 -- Lifecycle
@@ -1016,6 +1301,13 @@ net.install = function ()
 	local ok_d, err_d = realms.network_register(mod, RPC_VOTE, _on_vote)
 	local ok_e, err_e = realms.network_register(mod, RPC_CHOOSING, _on_choosing)
 	local ok_f, err_f = realms.network_register(mod, RPC_HOP, _on_hop)
+	local ok_g, err_g = realms.network_register(mod, RPC_TALLY, _on_tally)
+
+	if not ok_g then
+		mod:error("could not register the vote-tally RPC: %s", tostring(err_g))
+
+		return false
+	end
 
 	if not ok_f then
 		mod:error("could not register the mission-hop RPC: %s", tostring(err_f))
@@ -1071,6 +1363,21 @@ net.update = function (dt)
 
 	if not ok or not available then
 		return
+	end
+
+	-- Drop anyone Realms no longer lists. Cheap: a handful of keys against a
+	-- party of at most four.
+	local present = {}
+	local peers = net.peer_ids()
+
+	for i = 1, #peers do
+		present[peers[i]] = true
+	end
+
+	for peer_id in pairs(state.peers) do
+		if not present[peer_id] then
+			net.forget_peer(peer_id)
+		end
 	end
 
 	local entries = _local_entries()
@@ -1186,20 +1493,6 @@ net.connected_count = function ()
 	return n
 end
 
--- Can every attached peer actually hear us right now?
---
--- False while anyone is connected but not yet ready, which is exactly the
--- window a joining client sits in. Anything that would change shared state has
--- to wait for this rather than for connected_count alone.
-net.all_peers_ready = function ()
-	local connected = net.connected_count()
-
-	if connected == 0 then
-		return false
-	end
-
-	return #net.peer_ids() >= connected
-end
 
 net.report = function ()
 	local lines = {}

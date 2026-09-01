@@ -436,8 +436,22 @@ chain.launch = function (mission_context)
 	-- every call, while the main script that parks the accessor only re-runs on
 	-- an actual mod reload -- so a redeployed chain.lua can find itself running
 	-- against a main script from before the accessor existed.
-	if mod.announce_hop then
-		mod.announce_hop(mission_context.mission_name)
+	local announced = mod.announce_hop and mod.announce_hop(mission_context.mission_name)
+
+	-- Say so when there are people attached who could not be told.
+	--
+	-- The reset below drops them either way. If the announcement went out they
+	-- rejoin by themselves; if it did not -- no gameplay-control bus outside a
+	-- mission, which is the case this cannot rule out from the hub -- they are
+	-- simply gone, and the host is the only one in a position to know that and
+	-- say "rejoin me". Silence here reads as the mod having lost them.
+	if not announced and mod.has_peers then
+		local ok, peers = pcall(mod.has_peers)
+
+		if ok and peers then
+			mod:echo(mod:localize("launch_peers_manual_rejoin"))
+			mod:info("launching with peers attached but no announcement delivered - they must rejoin by hand")
+		end
 	end
 
 	Managers.multiplayer_session:reset("ChaosWastesAtHome run continuing")

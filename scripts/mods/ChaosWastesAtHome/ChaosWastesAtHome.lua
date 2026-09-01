@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "0.9.9"
+mod.version = "1.0.0"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -37,12 +37,14 @@ local escape = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/e
 local solo = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/solo")
 local loadouts = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/loadouts")
 local net = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/net")
+local choice_shield = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/choice_shield")
 
 local SETTINGS_VIEW = "chaos_wastes_settings_view"
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
 local BUFF_TOGGLE_VIEW = "chaos_wastes_buff_toggle_view"
 local LAUNCH_VIEW = "chaos_wastes_launch_view"
 local BUFFS_VIEW = "chaos_wastes_buffs_view"
+local VOTE_VIEW = "chaos_wastes_vote_view"
 
 -- Set for the lifetime of a mission we have taken over; everything else in the
 -- mod treats a non-nil `mod.manager` as "the Mortis buff system is live".
@@ -119,10 +121,16 @@ end
 local constructing = false
 
 -- Declared up here, not next to _update_run: the _destroy_buff_system hook
--- below assigns it, and a local declared after that hook would leave the
+-- below assigns these, and a local declared after that hook would leave the
 -- assignment writing to a global instead.
-local restored_this_mission = false
 local capture_accum = 0
+
+-- Assigned far below, next to the vote code it belongs with, and declared up
+-- here because mod.update calls it. A local referenced before its declaration
+-- compiles to a nil global, which is silent.
+local update_vote_trigger
+local vote_opened_this_mission = false
+local vote_accum = 0
 local params_this_mission = false
 
 -- Error text can contain a literal '%', which crashes the logging path when it
@@ -428,7 +436,15 @@ local MOVED_DEFAULTS = {
 	use_bots = false,
 	ignore_buff_family = false,
 	pause_on_choice = true,
-	sync_pause_multiplayer = false,
+	protect_while_choosing = true,
+	-- The difficulty the launcher last started a run at, as a rung key. Listed
+	-- here so it exists in the settings table from first load and is therefore
+	-- picked up by loadouts.snapshot; the launcher writes it, nothing reads it
+	-- but the launcher.
+	launch_rung = "",
+	vote_auto = true,
+	vote_delay_seconds = 20,
+	vote_tiebreak = "host",
 	objective_enabled = true,
 	objective_side_missions = true,
 	kills_enabled = false,
@@ -547,20 +563,63 @@ mod.has_peers = function ()
 	return net.connected_count() > 0
 end
 
--- ...and whether they can actually receive a synchronised timescale yet.
-mod.peers_syncable = function ()
-	return net.all_peers_ready()
-end
-
--- Both halves of "is anyone still on a buff card": we tell the others about
--- ours, and ask about theirs. Parked for pause.lua for the same reason as
--- above -- it must not load net.lua and get a second copy.
+-- We tell the others when our own card goes up or down. Parked for pause.lua
+-- for the same reason as above -- it must not load net.lua and get a second
+-- copy. The host reads the result through mod.peer_choosing below.
 mod.report_choosing = function (choosing)
 	net.set_local_choosing(choosing)
 end
 
-mod.peers_choosing = function (dt)
-	return net.any_peer_choosing(dt)
+-- The vote view reads and writes through these rather than loading net.lua,
+-- which re-executes per open and holds the vote state -- a second copy would
+-- tally into a table nobody resolves.
+mod.cast_vote = function (index)
+	return net.cast_vote(index)
+end
+
+mod.vote_counts = function ()
+	return net.vote_counts()
+end
+
+mod.vote_options = function ()
+	return net.vote_cards()
+end
+
+mod.vote_token = function ()
+	return net.vote_token()
+end
+
+mod.my_vote = function ()
+	return net.my_vote()
+end
+
+-- Is this player looking at the vote screen?
+mod.vote_view_open = function ()
+	return Managers.ui ~= nil and Managers.ui:view_active(VOTE_VIEW)
+end
+
+-- "This player is reading something and cannot fight back", whichever thing it
+-- is. The one definition, because it has two consumers that must agree:
+-- pause.lua reports it to the other machines, and choice_shield reads it for the
+-- local player.
+--
+-- They did not agree. The vote screen was folded into the reported flag only, so
+-- a client reading it was protected -- the host learned about it and shielded
+-- them -- while the host reading its own was not, since the shield asked
+-- choice_is_up directly and that is the buff card alone. The one player who
+-- cannot move (the vote screen takes input) was the one left exposed, and it
+-- takes two people to see it.
+mod.local_choosing = function ()
+	if mod.choice_is_up and mod.choice_is_up() then
+		return true
+	end
+
+	return mod.vote_view_open()
+end
+
+-- Which peer is on a card, for choice_shield.lua.
+mod.peer_choosing = function (peer_id)
+	return net.peer_choosing(peer_id)
 end
 
 -- Same again for chain.lua, which is io_dofile'd and must not carry its own
@@ -740,6 +799,11 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 	-- The network lookup especially: the ids this mod appends have to agree on
 	-- every peer, and a client that skipped it would crash on the first custom
 	-- buff the host granted -- which is the whole reason a client activates.
+	-- Both roles, and before anything can read it: the last mission's vote is
+	-- not this mission's, and until a new one opens the screen would otherwise
+	-- offer the party the map they have just finished.
+	net.reset_vote()
+
 	custom_buffs.register_network_lookup()
 	asset_loader.request()
 
@@ -1169,8 +1233,9 @@ mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (s
 	mod.manager = nil
 	mod.game_mode = nil
 	mod.role = nil
-	restored_this_mission = false
 	capture_accum = 0
+	vote_opened_this_mission = false
+	vote_accum = 0
 
 	-- Only the flag: run.state().params must survive teardown for the end
 	-- screen to roll the next mission's options from.
@@ -1375,6 +1440,41 @@ mod:register_view({
 		disable_game_world = false,
 		load_always = true,
 		load_in_hub = true,
+		game_world_blur = 1.1,
+	},
+	view_transitions = {},
+	view_options = {
+		close_all = false,
+		close_previous = false,
+	},
+})
+
+-- Voting on where the run goes next, mid-mission.
+--
+-- Its own view rather than a mode of the end-of-round picker, because the two
+-- want opposite layouts. The picker is squeezed in beside the scoreboard, so it
+-- hides modifier descriptions behind a hover; this one has the whole screen and
+-- shows all three missions in full, which is what makes comparing them a
+-- decision rather than a guess. It uses the launcher's cards for exactly that
+-- reason.
+--
+-- Blurs the game world and takes input, unlike the end-screen one: this opens
+-- while the mission is being played. Standing still to read it is safe because
+-- the view reports itself as a choice in progress, which is what makes
+-- choice_shield protect the player -- exactly as it does for a buff card.
+mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/vote_view")
+mod:register_view({
+	view_name = VOTE_VIEW,
+	view_settings = {
+		init_view_function = function (ingame_ui_context)
+			return true
+		end,
+		state_bound = true,
+		path = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/vote_view",
+		class = "ChaosWastesVoteView",
+		disable_game_world = false,
+		load_always = true,
+		load_in_hub = false,
 		game_world_blur = 1.1,
 	},
 	view_transitions = {},
@@ -1634,6 +1734,32 @@ end)
 
 -- Offer the next mission when the end screen opens on a won round. A loss is
 -- the end of the run, so no picker.
+-- Is the end-of-round screen up?
+--
+-- Needed because "no game mode is running" is true of three different places --
+-- a level loading, a preparation lobby, and this screen -- and a rejoin has to
+-- treat them differently. The first two mean the player has arrived somewhere;
+-- this one means they have landed in a session that is on its way out, and
+-- counting it as arrival disarms the rejoin moments before the host tears the
+-- session down. See net.lua's _update_hop.
+--
+-- A flag maintained by the state's own entry and exit, rather than inferred:
+-- the state knows, and every way of guessing from outside it was what caused
+-- the problem.
+mod._end_screen_up = false
+
+mod.end_screen_up = function ()
+	return mod._end_screen_up == true
+end
+
+mod:hook_safe(StateGameScore, "on_enter", function (self, parent, params, creation_context)
+	mod._end_screen_up = true
+end)
+
+mod:hook_safe(StateGameScore, "on_exit", function (self)
+	mod._end_screen_up = false
+end)
+
 mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 	if not run.is_active() then
 		return
@@ -1827,20 +1953,26 @@ local function _update_pending_launch(dt)
 		return
 	end
 
+	-- Shut the door for the whole of this window, not just once the hub has
+	-- finished loading.
+	--
+	-- Moving a run on re-hosts twice, not once: leaving the mission stands up a
+	-- Mourningstar session (SoloMourningstar makes the hub a local session, and
+	-- Realms turns that into a listen server on the same address), and launching
+	-- then tears that down for the mission. Anyone rejoining lands on whichever
+	-- happens to be listening when they knock -- measured 2026-09-01, a peer
+	-- dropped at 22:33 and the real launch was not until 22:34:12, fifty seconds
+	-- of open door in between.
+	--
+	-- Gating this on the hub game mode meant the door stayed open for the load
+	-- that precedes it, which is most of that window. Anything with a
+	-- pending_launch is on its way to a mission and has no business accepting
+	-- joins, whatever it is currently showing. The client re-arms itself if it
+	-- does land early, but not colliding at all is better than recovering.
+	net.hold_admission(true)
+
 	local game_mode = Managers.state and Managers.state.game_mode
 	local game_mode_name = game_mode and game_mode:game_mode_name()
-
-	-- Shut the door as soon as we are in the hub, before the settle timer
-	-- rather than after it.
-	--
-	-- With SoloMourningstar the hub is a listen server on the same address the
-	-- party joined, so for the whole of this window a reconnecting client can
-	-- land here instead of in the mission we are about to launch. The client
-	-- re-arms itself if that happens, but not colliding at all is better than
-	-- recovering from it.
-	if game_mode_name == "hub" then
-		net.hold_admission(true)
-	end
 	local session = Managers.multiplayer_session
 	local mechanism = Managers.mechanism
 
@@ -1913,13 +2045,14 @@ local function _update_run(dt)
 		end
 	end
 
-	-- Keeps being called until run.restore says everyone is in, not until it
-	-- first does something. A client reconnecting after a hop arrives minutes
-	-- after the host, and the single-shot version would have finished long
-	-- before they spawned.
-	if not restored_this_mission and run.should_restore() then
-		restored_this_mission = run.restore(dt)
-	end
+	-- Unconditional, and never "finished".
+	--
+	-- run.restore is a reconciliation now: it hands each player whatever they
+	-- are short by, which is nothing at all for anyone already whole. Gating it
+	-- on should_restore() -- or on having run once -- is what left a player who
+	-- rejoined mid-mission with none of their run's buffs, since by then the
+	-- restore had long since declared itself done. It throttles itself.
+	run.restore(dt)
 
 	-- Keep the carry-over snapshot fresh while the mission runs, rather than
 	-- taking it once during teardown.
@@ -2007,7 +2140,17 @@ mod.update = function (dt)
 	_update_loadout_save(dt)
 	triggers.update(dt)
 	pause.update(dt)
+	-- After pause.update, which is what publishes this machine's own card state
+	-- for the frame -- so the shield acts on the current answer rather than the
+	-- previous frame's.
+	choice_shield.update(dt)
 	custom_buffs.update(dt)
+
+	-- Guarded: this is assigned far below, and a mod reload that fails partway
+	-- through the file would otherwise nil-call it every frame.
+	if update_vote_trigger then
+		update_vote_trigger(dt)
+	end
 	net.update(dt)
 end
 
@@ -2071,14 +2214,13 @@ end
 -- _should_activate needs three things to take a mission over: run.is_launched(),
 -- the host role, and game_mode._is_server. chain.launch is only how the first
 -- of those usually gets set -- nothing requires it, and requiring it is what
--- makes multiplayer testing awkward, because the chain cannot survive a
--- session reset under Realms yet (see chain.lua's launch guard).
+-- makes it impossible to take over a mission started any other way.
 --
--- So: arm here, then start the mission with SoloPlay. The mod activates
--- exactly as if the launcher had done it, and no session reset happens. That
--- matters because SoloPlay launches under Realms are known good -- three clean
--- ones during the port measurement -- while the chain's own path is the one
--- that locked a machine.
+-- NOT the multiplayer workflow any more, though it was for one evening. That
+-- was a consequence of chain.launch refusing to run while Realms was loaded,
+-- which was itself based on a misreading -- the guard is gone as of 0.9.4 and
+-- Begin Run works from the Mourningstar with players attached. This is now just
+-- what it says: a way to arm a run without starting one.
 --
 -- Must be run in the Mourningstar, before the mission loads: activation is
 -- decided in _init_buff_system during mission init, and the flag has to be set
@@ -2129,7 +2271,7 @@ local function _resolve_vote()
 		return "no vote was opened"
 	end
 
-	local index, cast = net.vote_result()
+	local index, cast, note = net.vote_result()
 
 	if not index then
 		return "no vote is open"
@@ -2141,8 +2283,9 @@ local function _resolve_vote()
 		return "the winning option no longer exists"
 	end
 
-	mod:info("vote resolved: option %d (%s) with %d vote(s) cast",
-		index, tostring(option.mission_name), cast)
+	mod:info("vote resolved: option %d (%s) with %d vote(s) cast%s",
+		index, tostring(option.mission_name), cast,
+		note and (" - " .. note) or "")
 
 	-- Left in mod._vote_options on purpose. The end screen reads all three back
 	-- so the picker shows the missions the party voted on, with this one
@@ -2211,31 +2354,146 @@ mod:command("cw_vote_close", mod:localize("command_cw_vote_close"), function ()
 	mod:echo(mod:localize("vote_closed", chain.mission_display_name(mod._vote_winner.mission_name)))
 end)
 
-mod:command("cw_vote_open", mod:localize("command_cw_vote_open"), function ()
+-- Roll the next mission's options and put them to the party.
+--
+-- Shared by the command and the automatic trigger below, so both open exactly
+-- the same vote. Returns nil on success, a reason string otherwise.
+local function _open_vote()
 	if not mod.is_host() then
-		mod:echo(mod:localize("vote_host_only"))
-
-		return
+		return "vote_host_only"
 	end
 
 	local options = chain.roll_options(run.state().params)
 
 	if not options or #options == 0 then
-		mod:echo(mod:localize("vote_no_options"))
-
-		return
+		return "vote_no_options"
 	end
 
-	local labels = {}
+	-- Everything a card needs to draw itself on a machine that did not roll it.
+	-- Art is left out on purpose: mission_name resolves it locally from
+	-- MissionTemplates, so sending it would be bytes for nothing.
+	local cards = {}
 
 	for i = 1, #options do
-		labels[i] = chain.mission_display_name(options[i].mission_name)
+		local option = options[i]
+
+		cards[i] = {
+			label = chain.mission_display_name(option.mission_name),
+			mission_name = option.mission_name,
+			difficulty_label = option.difficulty_label,
+			modifiers_label = option.modifiers_label,
+			modifiers_detail = option.modifiers_detail,
+		}
 	end
 
 	mod._vote_options = options
 
-	if not net.start_vote(labels) then
-		mod:echo(mod:localize("vote_no_options"))
+	if not net.start_vote(cards) then
+		return "vote_no_options"
+	end
+
+	return nil
+end
+
+-- The vote goes up at the start of the mission, not the end of it.
+--
+-- Everyone has the whole mission to look at the three cards, argue about them
+-- and change their mind, and nobody has to stop and read anything at the moment
+-- the map is at its busiest. It also removes the question that made this hard:
+-- Darktide marks no objective as the last one, so "near the end" could only ever
+-- have been approximated from main-path progress -- a measure that is not even a
+-- percentage on the maps that are not a single path.
+--
+-- The delay is for the party, not the mission: a client that is still loading
+-- has no gameplay-control channel yet, and options sent before it arrives reach
+-- nobody. So this waits for peers to be reachable, and falls through on the
+-- timer for the solo case where there is nobody to wait for.
+local VOTE_PEER_WAIT_SECONDS = 45
+
+update_vote_trigger = function (dt)
+	if vote_opened_this_mission or not mod:get("vote_auto") then
+		return
+	end
+
+	-- has_authority, not is_host: only the machine that decides should roll the
+	-- options, and it needs a live game session to have peers to send them to.
+	if not mod.has_authority() or not run.is_active() then
+		return
+	end
+
+	vote_accum = vote_accum + (dt or 0)
+
+	if vote_accum < (mod:get("vote_delay_seconds") or 20) then
+		return
+	end
+
+	-- Hold a little longer if somebody is attached but not yet reachable --
+	-- Realms only delivers to a channel that has finished its handshake, so a
+	-- vote opened over a still-loading client is a vote they never see. Capped,
+	-- because a peer that never becomes ready must not stop the host voting.
+	if net.connected_count() > 0 and #net.peer_ids() < net.connected_count()
+		and vote_accum < VOTE_PEER_WAIT_SECONDS then
+		return
+	end
+
+	-- Set before the attempt, not after. A roll that fails will fail again next
+	-- frame, and retrying it sixty times a second would bury the log.
+	vote_opened_this_mission = true
+
+	local reason = _open_vote()
+
+	if reason then
+		mod:info("could not open the automatic vote: %s", reason)
+
+		return
+	end
+
+	mod:info("vote opened %ds into the mission, %d peer(s) reachable",
+		math.floor(vote_accum), #net.peer_ids())
+
+	mod:echo(mod:localize("vote_auto_opened"))
+end
+
+-- Open or close the vote screen. Bound to a key, and available to both roles --
+-- a client votes through exactly the same screen the host does.
+--
+-- Parked on the mod table because DMF keybinds of type function_call resolve
+-- their function_name against it.
+mod.toggle_vote = function ()
+	if not Managers.ui then
+		return
+	end
+
+	if Managers.ui:view_active(VOTE_VIEW) then
+		Managers.ui:close_view(VOTE_VIEW)
+
+		return
+	end
+
+	-- Only inside one of our own missions. The view is registered for gameplay
+	-- states, so asking for it in the Mourningstar is not a no-op, it is an
+	-- error.
+	if not mod.manager then
+		mod:echo(mod:localize("vote_none_open"))
+
+		return
+	end
+
+	-- Opened whether or not a vote is running. A key that does nothing is a key
+	-- you press twice wondering if it registered; the screen says the vote has
+	-- not opened yet, and fills itself in when it does.
+	Managers.ui:open_view(VOTE_VIEW, nil, nil, nil, nil, {
+		options = mod.vote_options and mod.vote_options() or {},
+	})
+end
+
+mod:command("cw_vote_view", mod:localize("command_cw_vote_view"), mod.toggle_vote)
+
+mod:command("cw_vote_open", mod:localize("command_cw_vote_open"), function ()
+	local reason = _open_vote()
+
+	if reason then
+		mod:echo(mod:localize(reason))
 
 		return
 	end
@@ -2309,6 +2567,20 @@ mod:command("cw_carry", mod:localize("command_cw_carry"), function ()
 	if not any then
 		mod:echo("  nothing carried yet")
 	end
+end)
+
+-- Stop trying to rejoin a host that is not coming back.
+--
+-- Either role, and deliberately not gated on anything: if somebody is watching
+-- failed join attempts go by, the command that stops them must work.
+mod:command("cw_rejoin_stop", mod:localize("command_cw_rejoin_stop"), function ()
+	if net.cancel_hop("asked to stop") then
+		mod:echo(mod:localize("hop_cancelled"))
+
+		return
+	end
+
+	mod:echo(mod:localize("hop_nothing_to_cancel"))
 end)
 
 mod:command("cw_peers", mod:localize("command_cw_peers"), function ()

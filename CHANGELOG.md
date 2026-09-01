@@ -1,5 +1,250 @@
 # Changelog
 
+## 1.0.0
+
+**The first release since 0.7.0.** Everything below arrived across the 0.8–0.15
+development builds, which were never published on their own.
+
+### Runs can be played with other people
+
+- **Play a run with friends** through the **Realms** mod, which lets players
+  connect directly to each other. Solo play is unchanged.
+- **Everyone in the session must be on the same version of this mod.** It checks
+  on connect and, if anyone does not match, withholds its own custom buffs from
+  the whole session rather than risk crashing them. `/cw_peers` shows who has
+  matched.
+- **Everyone earns and keeps their own buffs**, and the run carries all of them
+  from mission to mission -- including for a player who was disconnected when
+  the last mission ended.
+- **The party votes on the next mission.** Three maps go up shortly after each
+  mission starts, shown full-size with every modifier and what it does written
+  out. Open the vote screen with its keybind, click one, change your mind as
+  often as you like. Everyone sees the running tally, and ties are settled by a
+  rule you choose.
+- **Reading is safe without pausing.** Pausing cannot work with other players
+  connected -- stopping the clock disconnects them -- so instead, anyone looking
+  at a buff card or the vote screen cannot be hurt and enemies ignore them. This
+  also works solo if you would rather not pause.
+- **Moving between missions reconnects players automatically.** It does not
+  always land cleanly. Rejoining by hand costs nothing when it does not, because
+  the host holds everyone's buffs -- see the README.
+
+### Solo play
+
+- **Buff choices no longer offer buffs you are already carrying.** The offer
+  pools were rebuilt each mission without taking your carried buffs out of them,
+  so from the second mission onwards a card could contain a pick that did
+  nothing. Pools now deplete across a whole run rather than resetting.
+- **The launcher remembers the difficulty you last played at**, instead of
+  starting at Malice every time, and saves it with your loadout -- switching
+  loadouts on the start screen moves the difficulty slider too.
+
+### New commands
+
+`/cw_vote_view`, `/cw_vote`, `/cw_votes`, `/cw_vote_open`, `/cw_vote_close`,
+`/cw_peers`, `/cw_carry`, `/cw_rejoin_stop`, `/cw_modifiers`, `/cw_arm`. The
+README lists what each one does.
+
+---
+
+*Everything below this line is the development history between 0.7.0 and 1.0.0.
+None of it was released on its own, and the "known limits" noted in the 0.8 and
+0.9 entries describe states that were superseded before 1.0.0 shipped. Kept for
+reference rather than as a guide to the current version.*
+
+## 0.15.3
+
+- **Rejoining players no longer land in the Mourningstar on the way.** Moving a
+  run on restarts the host's session twice -- once leaving the mission, once
+  starting the next one -- and the gap between them was leaving the Mourningstar
+  open to joins for the best part of a minute. It is closed for the whole of
+  that window now, so players wait rather than arriving somewhere that is about
+  to disappear.
+
+## 0.15.2
+
+- **Fixed rejoining players landing on the end-of-round screen** when the host
+  was slower through it than they were. They were reconnecting to the session
+  the host had not finished leaving, which is about to be destroyed -- so they
+  were dropped again a moment later with nothing left trying to get them back.
+  That screen is now treated as somewhere to wait, not somewhere to arrive.
+
+## 0.15.1
+
+- **Fixed players being left retrying forever when the host quits from a
+  lobby.** Sitting in the host's lobby was not recognised as having rejoined --
+  a lobby has no mission running, which looks the same as a level still
+  loading -- so the rejoin stayed armed the whole time. When the host then left,
+  it started trying to reconnect to nobody. Being back with the host now counts
+  as done wherever it happens.
+- **New command `/cw_rejoin_stop`** to give up rejoining. It is named in the
+  message that appears while reconnecting, so it is there when you want it.
+
+## 0.15.0
+
+- **Rewrote the README for multiplayer.** It still said the mod was solo-only
+  and refused to run in a hosted game, which stopped being true several
+  releases ago. It now covers playing with other people, the vote, the version
+  requirement, what happens between missions, and why pausing is replaced by
+  protection. The commands and options tables were also missing about half of
+  what exists.
+
+## 0.14.3
+
+**Everyone in a session must be on this version.**
+
+- **Fixed the vote screen showing the previous mission's vote.** Opening it
+  before this mission's vote had gone up offered the map you had just finished.
+  It now says the vote has not opened yet, and fills itself in when it does --
+  so you can leave it open and watch the choices arrive.
+- The vote screen opens whether or not a vote is running, rather than the
+  keybind appearing to do nothing.
+- A vote cast with `/cw_vote` now shows as selected on the screen too, and
+  reopening the screen still shows what you picked.
+
+## 0.14.2
+
+**Everyone in a session must be on this version.**
+
+- **Fixed the host not being protected while reading the vote screen.** Everyone
+  else was. The screen takes over your controls, so the one player who could not
+  move was the one who could still be killed.
+- `/cw_peers` no longer lists players who left the session.
+
+## 0.14.1
+
+- **Fixed the settings screen running off the bottom.** The voting section was
+  added to the left column, which pushed it past the edge of a 1080p screen. It
+  has moved to the right, and the two columns are close to even again.
+- The voting section had also been inserted into the middle of the buff
+  settings, so five buff sliders were sitting under the "Voting" heading. They
+  are back where they belong.
+- Shortened "Open the vote this long after the mission starts", which wrapped
+  onto three lines, to "Vote opens after" with the seconds on the slider.
+
+## 0.14.0
+
+**Everyone in a session must be on this version.**
+
+- **New setting: "When a vote ties".** Three rules --
+  *The host decides* (the host's own vote wins if it is one of the tied
+  missions), *Whoever got there first* (the mission that reached the winning
+  count earliest), or *Pick at random*.
+  With only two players every disagreement is a tie, so this decides more often
+  than it sounds like it would. A tie between missions nobody voted for always
+  falls to the leftmost card.
+
+## 0.13.3
+
+**Everyone in a session must be on this version.**
+
+- **Tied votes now have a rule.** Previously a tie was settled by whatever order
+  the tally happened to be stored in, which could give different answers for the
+  same votes. `/cw_votes` says when a tie decided it.
+
+## 0.13.2
+
+**Everyone in a session must be on this version.**
+
+- **Everyone sees everyone's votes.** The host now sends the running tally out
+  to the party, so the numbers on the cards are the same on every screen. Before
+  this only the host could see the whole picture and everyone else saw just
+  their own choice.
+
+## 0.13.1
+
+**Everyone in a session must be on this version.**
+
+- **The vote opens shortly after each mission starts** and stays open until the
+  mission ends, so there is a whole mission to look at the three maps, argue
+  about them and change your mind -- rather than a decision to make while the
+  map is at its busiest. The delay is a setting, and it waits a little longer on
+  its own if someone is still loading in.
+  This also replaces 0.13.0's guess at "near the end of the level": Darktide
+  marks no objective as the last one, so that could only ever be approximated.
+- **The vote screen is now its own screen**, laid out like the run launcher --
+  full-size mission art, and every modifier with what it actually does written
+  out on the card. All three are readable side by side without hovering over
+  anything.
+
+## 0.13.0
+
+**Everyone in a session must be on this version.**
+
+- **A vote screen for the next mission.** Bind a key to "Open the vote screen"
+  and everyone in the party gets the same three mission cards the end-of-round
+  picker shows, and clicks the one they want. The winner is what the end screen
+  selects. You cannot be hurt or targeted while the screen is open.
+  You cannot be hurt or targeted while the screen is open, so reading it
+  mid-mission is safe.
+- **The vote opened near the end of the level**, judged from how far along the
+  level's main path the party had got. Replaced in 0.13.1.
+
+## 0.12.0
+
+**Everyone in a session must be on this version.**
+
+- **The launcher remembers the difficulty you picked**, instead of starting at
+  Malice every time. It is saved with the rest of your settings, so it is part
+  of a loadout -- switching loadouts on the start screen moves the difficulty
+  slider along with everything else.
+  Stored by name rather than by slider position, so a game update that adds a
+  difficulty or changes the Havoc ladder cannot quietly shift it.
+
+## 0.11.2
+
+**Everyone in a session must be on this version.** 0.11.0 can crash other
+players -- please update rather than staying on it.
+
+- **Fixed a crash for anyone who opened the tactical overlay (Tab) while a buff
+  card was up.** The protection buff added in 0.11.0 was filed under the same
+  category as the pickable buffs, and the overlay assumes anything in that
+  category has card art to draw. It is now an internal buff the overlay ignores.
+- **Removed "Pause everyone (experimental)".** It never worked -- Realms'
+  synchronised timescale was built for slow motion, and stopping the clock dead
+  still dropped the session. "Protect players while choosing" replaces it and
+  does the job properly.
+- **Removed the sixty-second "waiting for another player's buff choice"
+  message.** It belonged to the synchronised pause and had nothing left to wait
+  for.
+
+## 0.11.1
+
+**Everyone in a session must be on this version.**
+
+- **Begin Run works normally with other players connected.** It always did from
+  0.9.4 onwards; `/cw_arm` and a separate launcher were a workaround for a
+  restriction that no longer exists, and the wording had not caught up. Start
+  runs from the mod's own menu.
+- If starting a run disconnects players who could not be warned first, the host
+  is now told to ask them to rejoin, instead of them just vanishing.
+
+## 0.11.0
+
+**Everyone in a session must be on this version.**
+
+- **New setting: "Protect players while choosing" (on by default).** While a
+  buff card is on screen, that player cannot be hurt and enemies will not target
+  them, until they pick. Each player is protected only while their own card is
+  up.
+  This exists because pausing cannot work with other players connected --
+  stopping the clock disconnects them -- so without it, reading three cards
+  means standing still in the middle of a fight. Safe to leave on alongside
+  pausing; it has nothing to do when the game is already stopped.
+
+## 0.10.0
+
+**Everyone in a session must be on this version.**
+
+- **Fixed a player who rejoins mid-mission losing the run's buffs.** They came
+  back with nothing, and then the moment they earned a single new buff the run's
+  record of what they were carrying was overwritten by just that one -- so the
+  loss became permanent instead of lasting until the next mission.
+- **Buffs are now kept topped up continuously** rather than handed back once.
+  Whatever a player is short of what the run says they hold is given to them
+  whenever they turn up, so a rejoin at any point puts them back where they
+  were. Nobody gets anything twice: only the difference is handed over.
+
 ## 0.9.9
 
 **Everyone in a session must be on this version.**

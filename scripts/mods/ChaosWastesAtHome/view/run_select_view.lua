@@ -143,6 +143,7 @@ RunSelectView._cb_option_pressed = function (self, index)
 	mod:info("next mission selected: %s", tostring(option.mission_name))
 end
 
+
 -- The hover detail, refreshed every frame from whichever card the cursor is on.
 --
 -- Polled rather than driven by hover callbacks: the hotspot pass already tracks

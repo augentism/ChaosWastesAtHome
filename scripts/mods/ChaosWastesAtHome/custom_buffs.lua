@@ -471,6 +471,87 @@ _add({
 	end,
 })
 
+-- ---------------------------------------------------------------------------
+-- Not a pickable buff: the shield worn while a card is on screen
+-- ---------------------------------------------------------------------------
+
+-- Pausing cannot protect anyone in multiplayer -- stopping the host's clock
+-- disconnects everybody else -- so a player reading three cards is otherwise
+-- standing still in the middle of a fight. This makes them untargetable and
+-- unkillable for exactly as long as their own card is up.
+--
+-- Keywords rather than stat buffs, and these three specifically:
+--   invulnerable / damage_immune  -- nothing gets through
+--   unperceivable                 -- nothing aims at them in the first place
+--
+-- `unperceivable` and not `invisible`: side_system's _is_valid_target rejects
+-- either, but `invisible` also drives the stealth *presentation* -- the screen
+-- colour grade and the ability sound, built for a five-second Veteran ability.
+-- On something that flicks on and off with every card that fires constantly.
+-- Established by SoloSandbox, whose stealth bestowment carries the same note.
+--
+-- No `pool` key, so it is registered and networked like every other template
+-- here but never offered as a card. Being in the catalogue is what matters:
+-- _all_template_names covers it, so its network id is part of what the peer
+-- handshake compares, and the ids cannot silently disagree.
+--
+-- predicted = false, matching the rest. SoloSandbox uses predicted = true to
+-- stay out of NetworkLookup entirely, which is right for a client-side solo
+-- mod and wrong here: the host applies this to *other people's* units, and the
+-- server is what decides whether an attack lands.
+local CHOICE_SHIELD_BUFF = "cwah_choice_shield"
+
+custom_buffs.CHOICE_SHIELD_BUFF = CHOICE_SHIELD_BUFF
+
+_add({
+	id = CHOICE_SHIELD_BUFF,
+	template = function ()
+		local keywords = BuffSettings.keywords
+		local wanted = { "invulnerable", "damage_immune", "unperceivable" }
+		local resolved = {}
+
+		-- Built by name and checked, rather than indexed blind. A keyword the
+		-- game has renamed would otherwise leave a nil in the middle of the
+		-- array, which silently shortens it -- so the shield would apply, report
+		-- success, and protect against less than it claims.
+		for i = 1, #wanted do
+			local keyword = keywords and keywords[wanted[i]]
+
+			if keyword then
+				resolved[#resolved + 1] = keyword
+			else
+				mod:error("buff keyword '%s' no longer exists - the choice shield is weaker than it should be",
+					wanted[i])
+			end
+		end
+
+		return {
+			class_name = "buff",
+			max_stacks = 1,
+			max_stacks_cap = 1,
+			predicted = false,
+			-- `generic`, NOT hordes_buff like every pickable buff above, and this
+			-- is load-bearing rather than tidiness.
+			--
+			-- The tactical overlay (Tab) walks the player's buffs, and for
+			-- anything categorised hordes_buff it does
+			-- `HordeBuffsData[buff_name].is_family_buff`
+			-- (hud_element_tactical_overlay.lua:366-368) -- unguarded, alone
+			-- among that block's lines, every one of which is `buff_data and`.
+			-- This buff is not pickable so it has no HordesBuffsData entry, so
+			-- that is a nil index and a hard crash the moment anyone opens Tab
+			-- while a card is up. It crashed a real player.
+			--
+			-- `generic` also makes the overlay skip it outright: its display gate
+			-- (line 311) is "not generic and not weapon and ... or has_hud", and
+			-- this has no HUD data either. Which is the right outcome anyway --
+			-- an internal mechanism has no business in the buff list.
+			buff_category = buff_categories.generic,
+			keywords = resolved,
+		}
+	end,
+})
+
 -- Deliberately "some other effect", never the one that just landed.
 --
 -- Matching on the name alone is not enough: the effect that triggered this may
