@@ -741,25 +741,28 @@ custom_buffs.install_hooks = function ()
 			return
 		end
 
-		-- The owner must be OUR player, not merely something with a buff
-		-- extension. Two reasons, and the second one is a crash:
+		-- The owner must be a player -- any player in the party, not just this
+		-- one.
 		--
-		-- 1. This mod is solo-only. Another player's status effects are not
-		--    ours to cascade from even if we could see them.
-		-- 2. In a hosted mission the owner is usually a remote player's HUSK,
-		--    and PlayerHuskBuffExtension is a standalone class -- NOT a
-		--    BuffExtensionBase subclass (player_husk_buff_extension.lua:4). It
-		--    implements has_keyword, buffs and current_stacks but not
-		--    has_buff_using_buff_template, so calling that on one is an
-		--    "attempt to call method (a nil value)" error, once per status
-		--    effect applied anywhere in the mission.
+		-- It used to require the LOCAL player specifically, for two reasons that
+		-- have both since expired. The first was that the mod was solo-only,
+		-- which it is not. The second was the husk hazard: PlayerHuskBuffExtension
+		-- is a standalone class, not a BuffExtensionBase subclass
+		-- (player_husk_buff_extension.lua:4), so it has no
+		-- has_buff_using_buff_template and calling it is an "attempt to call
+		-- method (a nil value)" error.
 		--
-		-- Identity is the right test rather than duck-typing the method: it
-		-- states the actual requirement, and it is one comparison instead of a
-		-- table lookup on a path that runs for every buff on every enemy.
-		local local_player = Managers.player and Managers.player:local_player_safe(1)
+		-- That hazard cannot arise here. The husk extension is only ever added
+		-- when `not is_server` (player_character_unit_template.lua:358), and this
+		-- whole function is behind has_authority() -- which is game_session
+		-- is_server. On the server every player unit, remote ones included, has
+		-- the full PlayerUnitBuffExtension.
+		--
+		-- The cost of the old test was silent: a guest who picked Contagion had
+		-- a buff that did nothing at all, with nothing logged to say so.
+		local owner_player = Managers.player and Managers.player:player_by_unit(owner_unit)
 
-		if not local_player or owner_unit ~= local_player.player_unit then
+		if not owner_player then
 			return
 		end
 

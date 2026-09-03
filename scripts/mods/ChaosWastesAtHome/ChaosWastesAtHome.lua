@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "1.0.0"
+mod.version = "1.1.2"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -21,6 +21,10 @@ local MechanismAdventure = require("scripts/managers/mechanism/mechanisms/mechan
 local StateGameScore = require("scripts/game_states/game/state_game_score")
 local ProgressionManager = require("scripts/managers/progression/progression_manager")
 local MultiplayerSessionManager = require("scripts/managers/multiplayer/multiplayer_session_manager")
+-- Needed by the character-select launch below, to read a mission's mechanism.
+-- Already loaded by chain.lua at mod load, so this is a cache hit rather than a
+-- second execution.
+local MissionTemplates = require("scripts/settings/mission/mission_templates")
 
 local shim = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/game_mode_shim")
 local triggers = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/triggers")
@@ -1510,6 +1514,15 @@ local function _can_open_launcher()
 		return true
 	end
 
+	-- Character select. Nothing about the launcher needs the Mourningstar --
+	-- the difficulty comes from its own slider and the missions from static
+	-- templates -- and starting from here skips the hub load entirely. This
+	-- used to be refused only because the test below asks a question the main
+	-- menu cannot answer: there is no game mode there at all.
+	if chain.on_main_menu and chain.on_main_menu() then
+		return true
+	end
+
 	local game_mode_manager = Managers.state and Managers.state.game_mode
 
 	if not game_mode_manager then
@@ -1593,6 +1606,77 @@ mod.toggle_menu = function ()
 end
 
 mod:command("cw_menu", mod:localize("command_cw_menu"), mod.toggle_menu)
+
+-- Starting a run from character select.
+--
+-- StateMainMenu only moves when its update returns a state, so the transition
+-- has to be produced here rather than left for something else to notice -- which
+-- is the one structural difference from launching in the hub, and the reason
+-- chain.launch cannot be reused.
+--
+-- The sequence is the game's own, and the same three calls chain.launch makes
+-- once its reset has finished: boot the session, change mechanism with the
+-- mission context, say everyone is ready. No reset, because there is nothing to
+-- leave. SoloPlay does exactly this, which is what established it works.
+--
+-- Hooked by name, never by require: the class may not exist yet when mods load,
+-- and a require that throws then is unrecoverable for the rest of the session.
+-- The name form defers resolution until the game has the class.
+local main_menu_awaiting_transition = false
+
+mod:hook("StateMainMenu", "update", function (func, self, main_dt, main_t)
+	-- The transition is not always ready on the frame the mechanism changes, so
+	-- once armed we ask again every frame until it is.
+	if main_menu_awaiting_transition then
+		local next_state, next_state_params = Managers.mechanism:wanted_transition()
+
+		if next_state then
+			main_menu_awaiting_transition = false
+
+			return next_state, next_state_params
+		end
+	end
+
+	if self._continue and not self:_waiting_for_synchronizations() then
+		local mission_context = mod._main_menu_launch
+
+		if mission_context then
+			-- Consumed before the attempt. A launch that fails must not be
+			-- retried on the next frame, sixty times a second.
+			mod._main_menu_launch = nil
+
+			local mission = MissionTemplates[mission_context.mission_name]
+
+			if mission then
+				mod:info("starting '%s' from character select", tostring(mission_context.mission_name))
+
+				Managers.multiplayer_session:boot_singleplayer_session()
+				Managers.mechanism:change_mechanism(mission.mechanism_name, mission_context)
+				Managers.mechanism:trigger_event("all_players_ready")
+
+				main_menu_awaiting_transition = true
+
+				local next_state, next_state_params = Managers.mechanism:wanted_transition()
+
+				if next_state then
+					main_menu_awaiting_transition = false
+
+					return next_state, next_state_params
+				end
+
+				-- Armed and waiting. Deliberately does NOT fall through to the
+				-- original this frame: it would take the ordinary Continue
+				-- branch and send us to the Mourningstar instead.
+				return
+			end
+
+			mod:error("cannot start '%s' from character select: no such mission",
+				tostring(mission_context.mission_name))
+		end
+	end
+
+	return func(self, main_dt, main_t)
+end)
 
 -- ---------------------------------------------------------------------------
 -- Buff toggle menu

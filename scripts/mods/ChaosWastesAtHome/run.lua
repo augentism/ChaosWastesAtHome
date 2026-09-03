@@ -209,6 +209,23 @@ run.restore_family = function (selector, player)
 		return false
 	end
 
+	-- Ask the game, not our own bookkeeping.
+	--
+	-- set_buff_family_for_player is NOT idempotent: it table.inserts the whole
+	-- family into the player's offer pool every time it is called
+	-- (mission_buffs_persistent_data.lua:281-300), so calling it twice leaves
+	-- two of every family buff in there, and a hundred times leaves a hundred.
+	-- A flag alone is too fragile a thing to hang that on -- it was lost once
+	-- already -- so the real test is whether the player has a family at all.
+	local handler = selector._mission_buffs_handler
+	local ok_has, has_family = pcall(handler.does_player_have_family_selected, handler, player)
+
+	if ok_has and has_family then
+		record.family_restored = true
+
+		return false
+	end
+
 	local ok, err = pcall(selector.set_buff_family_for_player, selector, player, record.family, false)
 
 	if not ok then
@@ -346,6 +363,12 @@ run.capture = function (quiet)
 				peer_id = _player_peer_id(player),
 				name = _player_name(player),
 				restored = previous and previous.restored or nil,
+				-- Carried like `restored`, and for a much sharper reason:
+				-- dropping it made the reconciliation re-apply the family every
+				-- second, and the engine APPENDS a family's buffs to the offer
+				-- pool rather than replacing them. A mission's worth of that
+				-- buries the pool in duplicates of what you already hold.
+				family_restored = previous and previous.family_restored or nil,
 			}
 
 			total = total + count

@@ -343,14 +343,26 @@ LaunchView.cb_begin = function (self)
 	Promise.until_true(function ()
 		return not Managers.ui:view_active(VIEW_NAME)
 	end):next(function ()
-		chain.launch({
+		local mission_context = {
 			mission_name = option.mission_name,
 			challenge = option.challenge,
 			resistance = option.resistance,
 			circumstance_name = option.circumstance_name,
 			havoc_data = option.havoc_data,
 			side_mission = "default",
-		})
+		}
+
+		-- Two ways in, and they are not interchangeable: from character select
+		-- there is no session to reset and no old one to wait for, and the
+		-- transition has to be handed back to the main menu's own update rather
+		-- than left for a running state machine to notice. See chain.lua.
+		if chain.on_main_menu and chain.on_main_menu() then
+			chain.arm_main_menu_launch(mission_context)
+
+			return
+		end
+
+		chain.launch(mission_context)
 	end)
 end
 

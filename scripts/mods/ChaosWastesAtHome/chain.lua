@@ -398,6 +398,54 @@ end
 -- StateLoading run, every GameplayInitStep completing in order and this mod's
 -- own game-mode shim installing. Memory ran away during that level load and
 -- took the machine with it -- a real problem, and a separate one.
+-- Are we at character select?
+--
+-- By the view rather than by game state: at the main menu there is no
+-- Managers.state.game_mode at all, so there is nothing to ask. SoloPlay tests
+-- the same way and starts missions from here, which is what established that
+-- this is possible at all.
+chain.on_main_menu = function ()
+	return Managers.ui ~= nil and Managers.ui:view_active("main_menu_view")
+end
+
+-- Start a run from character select, without loading the Mourningstar first.
+--
+-- A different path from chain.launch below, not a variant of it, because the two
+-- differ in every step that matters:
+--
+--   * No multiplayer_session:reset(). There is no session to leave -- that is
+--     the whole point of starting from here.
+--   * No waiting on _session_boot.leaving_game_session. That flag is only set
+--     when a live Managers.state.game_session exists
+--     (multiplayer_session_manager.lua:307); here there is none, the boot
+--     installs immediately, and the flag never flips. chain.launch's poll would
+--     wait forever, which is why this could not simply reuse it.
+--   * The transition has to be RETURNED to the state machine rather than left
+--     for it to notice. StateMainMenu only moves when its update returns a
+--     state, so the work happens inside a hook on that update (see the main
+--     script) and this function only arms it.
+--
+-- The arming half. mission_context is the same table chain.launch takes.
+chain.arm_main_menu_launch = function (mission_context)
+	local mission = MissionTemplates[mission_context.mission_name]
+
+	if not mission then
+		mod:error("cannot launch unknown mission '%s'", tostring(mission_context.mission_name))
+
+		return false
+	end
+
+	mod._main_menu_launch = mission_context
+
+	mod:info("arming '%s' to start from character select", tostring(mission_context.mission_name))
+
+	-- Sets StateMainMenu._continue, the same thing pressing Continue does. The
+	-- hook then sees both that and our armed context.
+	Managers.event:trigger("event_state_main_menu_continue")
+
+	return true
+end
+
 chain.launch = function (mission_context)
 	local mission = MissionTemplates[mission_context.mission_name]
 

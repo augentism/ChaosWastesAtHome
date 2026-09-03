@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.2
+
+**Everyone in a session must be on this version.**
+
+- **Fixed Contagion doing nothing for anyone but the host.** A guest could pick
+  it and it never fired once -- silently, with nothing to say so. It now
+  spreads status effects for whoever is carrying it.
+
+## 1.1.1
+
+- **Fixed the same small buff being handed out over and over.** The run was
+  re-applying your buff family once a second for the whole mission, and the game
+  adds a family's buffs to your pool rather than replacing them -- so the pool
+  filled up with thousands of copies of the same ten buffs, and almost every
+  grant after that was one you already had. Affects solo runs as much as
+  multiplayer ones.
+
+## 1.1.0
+
+- **Start a run from character select, without loading the Mourningstar.** Pick
+  your character, open the Chaos Wastes menu, choose a mission and press Begin --
+  the run starts directly. Saves the hub load at the start of every run.
+  The Mourningstar still works exactly as before if you would rather start
+  there.
+
 ## 1.0.0
 
 **The first release since 0.7.0.** Everything below arrived across the 0.8–0.15

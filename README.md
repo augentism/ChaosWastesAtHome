@@ -32,7 +32,8 @@ Optional:
 
 ## How a run works
 
-1. In the Mourningstar, press your menu key. The launcher offers a **difficulty
+1. Press your menu key — **at character select, or in the Mourningstar**. The
+   launcher offers a **difficulty
    slider** — Malice, Heresy, Damnation, Auric, then Havoc 25 / 30 / 35 / 40 —
    and **three missions** rolled at that difficulty. Reroll if you like.
 2. Press **Begin the run**. The mission loads. On spawn you choose a **buff
@@ -66,9 +67,14 @@ One keybind, and what it opens depends on where you are:
 
 | Where | What opens |
 |---|---|
+| Character select | **Start a Crusade** — the launcher |
 | Mourningstar | **Start a Crusade** — the launcher |
 | In a run | **Buffs Collected** — everything you are carrying |
 | Anything already open | Closes it |
+
+**Starting from character select skips the Mourningstar entirely** — pick your
+character, choose a mission, and the run loads straight into it. Starting from
+the Mourningstar works exactly as it always did.
 
 Whichever one you land on, the rest are tabs across the top of it. In a mission
 there are four — Start a Crusade, Rollable Buffs, Settings, Buffs Collected —
@@ -221,6 +227,8 @@ nothing.
   end, which makes runs unloseable. The mod warns once in chat if it detects
   this. Turn that setting off for runs to work properly.
 - Buff budgets are per mission, so long runs get very strong. Tuning welcome.
+- **Starting from character select is new.** If it misbehaves, starting from
+  the Mourningstar is the well-worn path.
 - **Multiplayer is new and less tested than solo.** The automatic rejoin between
   missions is the weakest part — see above. Rejoining by hand always works and
   costs nothing, because buffs are held by the host rather than by each player.
