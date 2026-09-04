@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.3
+
+- **Fixed this mod's screens drawing over the character-select screen instead
+  of covering it.** Opened from character select rather than the Mourningstar,
+  the Settings tab had no backdrop at all and the run launcher only a partial
+  one, so the ship and your character showed through the text. Both are now
+  solid there. Nothing changes in the Mourningstar or in a mission, where the
+  blurred world behind these screens is meant to show through.
+
 ## 1.2.2
 
 **Everyone in a session must be on this version.**
@@ -68,8 +77,15 @@ must be on this version of this mod.
 
 ## 1.0.0
 
-**The first release since 0.7.0.** Everything below arrived across the 0.8–0.15
-development builds, which were never published on their own.
+**Never published.** This was written as the first release since 0.7.0 and did
+not go out; 1.2.3 is. Everything below arrived across the 0.8–0.15 development
+builds, which were not published on their own either.
+
+Two things described here were replaced before anything shipped, so read 1.2.0
+after it: the mid-mission vote screen and its keybind became a vote on the
+end-of-round screen, and the reconnect-between-missions flow is gone entirely --
+the party now moves without disconnecting. `/cw_vote_view`, `/cw_vote_open`,
+`/cw_vote_close` and `/cw_rejoin_stop` no longer exist.
 
 ### Runs can be played with other people
 

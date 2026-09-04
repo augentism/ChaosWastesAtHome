@@ -21,7 +21,10 @@ Optional:
   merely recommended — it is what lets a run change mission without
   disconnecting anyone. Realms' own **Enable Realms server** setting is
   respected: switch it off and runs chain through the Mourningstar exactly as
-  they do without Realms installed.
+  they do without Realms installed. Realms needs a Darktide Mod Framework from
+  August 2026 or later; on an older one it fails to load with a
+  `'type' field must contain valid widget type name` line in the log and is
+  simply absent, with no other warning.
 - **Tertium4Or5** if you want bots. Runs are solo with no team by default; see
   *Bots* below.
 
