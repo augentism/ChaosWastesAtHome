@@ -8,6 +8,7 @@ local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 
 local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
 local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
+local backdrop = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/backdrop")
 
 local _s = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/launch_view_settings")
 
@@ -217,9 +218,9 @@ local function _option_widget(scenegraph_id)
 end
 
 local widget_definitions = {
-	background = UIWidget.create_definition({
-		{ pass_type = "rect", style = { color = { 200, 0, 0, 0 } } },
-	}, "screen"),
+	-- 200 where a blurred game world sits behind it, opaque in character
+	-- select where nothing does. See backdrop.lua.
+	background = backdrop.definition(200),
 
 	title = UIWidget.create_definition({
 		{

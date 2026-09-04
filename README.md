@@ -16,8 +16,12 @@ Solo out of the box, and **playable with friends** through the Realms mod — se
 
 Optional:
 
-- **Realms** (by deluxghost) to play a run with other people. Load it **above**
-  this mod in `mod_load_order.txt`.
+- **Realms 0.4.0 or later** (by deluxghost) to play a run with other people.
+  Load it **above** this mod in `mod_load_order.txt`. 0.4.0 is required, not
+  merely recommended — it is what lets a run change mission without
+  disconnecting anyone. Realms' own **Enable Realms server** setting is
+  respected: switch it off and runs chain through the Mourningstar exactly as
+  they do without Realms installed.
 - **Tertium4Or5** if you want bots. Runs are solo with no team by default; see
   *Bots* below.
 
@@ -89,10 +93,6 @@ the new mission — no defeat screen, no stop in the Mourningstar. The button
 reads *End run & begin* while a run is live so it is clear what it does. There
 is no confirmation step beyond that.
 
-There is a **second keybind for the vote screen**, which only matters with other
-people in your session. It opens during a mission and shows the three maps the
-run can go to next.
-
 **Rollable Buffs** lists every buff that can be rolled, grouped by family and by
 class, with its icon and real description. Almost everything is on by default;
 switch anything off and it stops appearing in buff choices for good. A few are
@@ -125,33 +125,23 @@ its own custom buffs from the whole session rather than risk crashing them.
 player is carrying and hands it back as they spawn into the next mission,
 including to someone who is still reconnecting minutes later.
 
-**The party votes on the next mission.** Shortly after each mission starts, three
-maps go up for a vote. Open the vote screen with its keybind, click the one you
-want, and change your mind as often as you like — nothing is decided until the
-mission ends. Everyone sees the running tally. What happens when it ties is a
+**The party votes on the next mission.** When a mission ends, the end-of-round
+screen shows the same three cards it always has — but with other players
+connected, everyone sees them and a click is a vote. The tally updates live on
+the cards, so you can see what the others are picking and change your mind.
+Whoever the vote lands on is where the run goes. What happens when it ties is a
 setting.
 
-**Moving to the next mission disconnects everyone briefly.** Starting a mission
-restarts the host's session — that is how the game itself does it, and there is
-no way around it. Players are warned first and rejoin automatically; the chat
-says what is happening.
+**Nobody is disconnected between missions.** The run moves the whole party
+straight from the scoreboard into the next mission with the session intact.
+Earlier versions restarted the host's session and had everyone reconnect; that
+is gone, along with the failed rejoins that came with it.
 
-**The automatic rejoin is not reliable yet.** Moving a run on restarts the
-host's session twice in quick succession, and a player can land on the one that
-is already on its way out — usually the previous mission's end screen. It sorts
-itself out on the next attempt more often than not, but if someone ends up
-somewhere strange, **the fix is simply to rejoin from the Realms menu with the
-same address, and nothing is lost by doing it**: the host holds everyone's
-buffs, so they are handed straight back on arrival. Even quitting to desktop and
-coming back keeps them.
-
-`/cw_rejoin_stop` stops it trying, if the host has gone for good.
 
 **Pausing is off with other players connected.** Stopping the clock only stops
 the host's game and disconnects everyone else within seconds, so it is skipped.
-Instead, **anyone reading a buff card or the vote screen cannot be hurt and
-enemies will not target them**, so stopping to read is safe without stopping the
-world. That protection is per player and lasts exactly as long as their own
+Instead, **anyone reading a buff card cannot be hurt and enemies will not target
+them**, so stopping to read is safe without stopping the world. That protection is per player and lasts exactly as long as their own
 screen is open.
 
 ## Options worth knowing
@@ -162,19 +152,16 @@ A few sit in the DMF mod options menu, marked below.
 | Option | Default | Notes |
 |---|---|---|
 | Open the Chaos Wastes menu *(mod options)* | unbound | **Bind this first** |
-| Open the vote screen *(mod options)* | unbound | Only useful with other players |
 | Ramp difficulty each mission | on | Off keeps the run at its starting difficulty |
 | Bring bots | off | On = the game's bots fill the squad; see above |
 | Pause while choosing | on | Freezes the game **and holds the card countdown**, so nothing is auto-picked. Off = stock 30s timer. **Skipped entirely when other players are connected** — it would disconnect them |
-| Protect players while choosing | on | While a buff card or the vote screen is up, that player cannot be hurt and enemies ignore them. This is what makes reading safe when pausing cannot be used |
+| Protect players while choosing | on | While a buff card is up, that player cannot be hurt and enemies ignore them. This is what makes reading safe when pausing cannot be used |
 | Ignore buff families | off | Small buffs come from **every** family, not just the one you picked — ~70 instead of ~10. You still choose a family and still get its opening buff |
 | Starting card picks / family buffs | 0 / 0 | A hand dealt at the start of a run, once |
 | Custom buff frequency | 1 | How often the mod's own buffs come up, relative to the shipped categories |
 | Legendary card picks / Family buffs | 3 / 7 | Per mission, not per run — deep runs stack up fast |
 | Environment chance | 50% | Havoc only: hunting grounds / ventilation purge / toxic gas |
 | How buffs are earned | objective only | Objectives, kills, a timer and terror events can each be switched on as sources |
-| Vote on the next mission automatically | on | Off = only the host calling `/cw_vote_open` puts one up |
-| Vote opens after | 20s | Measured from the mission starting. It waits longer on its own if someone is still loading in |
 | When a vote ties | The host decides | Or *Whoever got there first*, or *Pick at random* |
 | Extra seconds on the end screen *(mod options)* | 30 | Solo end screens are very short by default |
 | Load Mortis assets *(mod options)* | on | Needed for buff icons and effects; ~0.5s warm, ~3s on the first load after launching the game, once per run |
@@ -229,13 +216,12 @@ nothing.
 - Buff budgets are per mission, so long runs get very strong. Tuning welcome.
 - **Starting from character select is new.** If it misbehaves, starting from
   the Mourningstar is the well-worn path.
-- **Multiplayer is new and less tested than solo.** The automatic rejoin between
-  missions is the weakest part — see above. Rejoining by hand always works and
-  costs nothing, because buffs are held by the host rather than by each player.
+- **Multiplayer is newer and less tested than solo.**
+- The end-of-round screen's credits and XP are placeholder numbers in any
+  local session, this mod or not — the backend does not issue a report for one.
+  The mission cards and the vote on that screen are unaffected.
 - A player who drops and rejoins **during** a mission gets their buffs back on
   the next one rather than immediately.
-- Nothing stops you sitting in the vote screen indefinitely while enemies cannot
-  touch you. Left as-is on purpose; it is your run.
 
 ## Reporting a problem
 
@@ -274,14 +260,10 @@ With other players connected:
 
 | Command | What it does |
 |---|---|
-| `/cw_vote_view` | The vote screen, same as the keybind |
-| `/cw_vote <number>` | Vote without opening the screen |
+| `/cw_vote <number>` | Vote from chat instead of clicking a card |
 | `/cw_votes` | The current tally in chat |
-| `/cw_vote_open` | Host: put the next mission to a vote now |
-| `/cw_vote_close` | Host: settle the vote early |
 | `/cw_peers` | Who is connected and whether their version matches |
 | `/cw_carry` | What the run is holding for each player |
-| `/cw_rejoin_stop` | Give up rejoining a host that is not coming back |
 
 ## Credits
 

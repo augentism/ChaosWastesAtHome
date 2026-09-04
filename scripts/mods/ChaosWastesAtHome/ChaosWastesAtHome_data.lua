@@ -52,18 +52,6 @@ return {
 				keybind_type    = "function_call",
 				function_name   = "toggle_menu",
 			},
-			-- Separate from menu_keybind rather than another context of it: the
-			-- vote screen is the one thing you want to open *while* a mission is
-			-- being played, and the mission context of that key is already the
-			-- collected-buffs screen.
-			{
-				setting_id      = "vote_keybind",
-				type            = "keybind",
-				default_value   = {},
-				keybind_trigger = "pressed",
-				keybind_type    = "function_call",
-				function_name   = "toggle_vote",
-			},
 			-- The same thing from the options menu, for anyone who has not bound
 			-- a key. A dropdown, not a button: DMF has no button widget type.
 			-- on_setting_changed resets it to "none" so it can be picked again.

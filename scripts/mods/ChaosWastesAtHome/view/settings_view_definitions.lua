@@ -7,6 +7,7 @@ local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 
 local strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/loadout_strip")
 local tab_strip = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/tab_strip")
+local backdrop = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/backdrop")
 
 -- Everything a loadout controls, other than which buffs can roll.
 --
@@ -84,8 +85,6 @@ local LAYOUT = {
 		{ kind = "check", id = "events_enabled" },
 
 		{ kind = "header", key = "settings_section_vote" },
-		{ kind = "check", id = "vote_auto" },
-		{ kind = "slider", id = "vote_delay_seconds", min = 0, max = 120, step = 5, suffix = "s" },
 		{
 			kind = "cycle",
 			id = "vote_tiebreak",
@@ -232,6 +231,15 @@ local scenegraph_definition = {
 }
 
 local widget_definitions = {
+	-- Full-screen backdrop. The other screens in this mod each define one and
+	-- this was the only one without, which is nearly invisible in the
+	-- Mourningstar and obviously broken in character select. See backdrop.lua
+	-- for why the alpha depends on where the view opened.
+	--
+	-- Opaque in both: this screen is two dense columns of small text, and the
+	-- launcher's 200 left the hub readable through it.
+	background = backdrop.definition(backdrop.OPAQUE),
+
 	title = UIWidget.create_definition({
 		{
 			pass_type = "text",

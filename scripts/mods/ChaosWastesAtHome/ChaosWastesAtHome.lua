@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "1.1.2"
+mod.version = "1.2.2"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -18,6 +18,10 @@ local ConstantElementMissionBuffs = require("scripts/ui/constant_elements/elemen
 local HOST_TYPES = MatchmakingConstants.HOST_TYPES
 
 local MechanismAdventure = require("scripts/managers/mechanism/mechanisms/mechanism_adventure")
+-- The generic event dispatcher. Hooked only to swallow game_score_done -- see
+-- _try_continue_in_session for why the mechanism's own handler is the wrong
+-- seam for that.
+local MechanismManager = require("scripts/managers/mechanism/mechanism_manager")
 local StateGameScore = require("scripts/game_states/game/state_game_score")
 local ProgressionManager = require("scripts/managers/progression/progression_manager")
 local MultiplayerSessionManager = require("scripts/managers/multiplayer/multiplayer_session_manager")
@@ -48,7 +52,6 @@ local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
 local BUFF_TOGGLE_VIEW = "chaos_wastes_buff_toggle_view"
 local LAUNCH_VIEW = "chaos_wastes_launch_view"
 local BUFFS_VIEW = "chaos_wastes_buffs_view"
-local VOTE_VIEW = "chaos_wastes_vote_view"
 
 -- Set for the lifetime of a mission we have taken over; everything else in the
 -- mod treats a non-nil `mod.manager` as "the Mortis buff system is live".
@@ -129,12 +132,36 @@ local constructing = false
 -- assignment writing to a global instead.
 local capture_accum = 0
 
--- Assigned far below, next to the vote code it belongs with, and declared up
--- here because mod.update calls it. A local referenced before its declaration
--- compiles to a nil global, which is silent.
-local update_vote_trigger
-local vote_opened_this_mission = false
-local vote_accum = 0
+-- Seconds left of "a mission swap is underway, swallow every way out".
+--
+-- The end screen can be left more than once. Spamming Space fires
+-- leave("skip_end_of_round") repeatedly, and the first one consumes
+-- next_mission -- so the second finds nothing to do, reports "not mine", and
+-- the real leave runs underneath a transition that has already started. Solo
+-- that is a detour through the Mourningstar; in a party it is
+-- shutdown_connections with everyone still aboard.
+--
+-- Counted down rather than latched outright so a swap that dies after this is
+-- set cannot strand the player on a scoreboard they are unable to leave.
+-- Cleared outright when the next mission comes up.
+local continue_in_flight = 0
+local CONTINUE_IN_FLIGHT_SECONDS = 45
+
+-- Seconds left of "hold this client on the end screen; the host is about to
+-- move us".
+--
+-- A guest cannot perform the transition -- only the host can -- so their way
+-- off the scoreboard has to be held rather than acted on. Left alone, pressing
+-- Space runs the real leave and they walk out of the session moments before the
+-- host would have carried them to the next mission, landing them in the
+-- Mourningstar on their own.
+--
+-- Armed at teardown, where mod.role is still readable; the end screen itself
+-- runs after the role is cleared. Counted down rather than latched so a host
+-- that quits, or never continues, cannot trap somebody on a screen they are
+-- unable to leave.
+local client_hold = 0
+local CLIENT_HOLD_SECONDS = 90
 local params_this_mission = false
 
 -- Error text can contain a literal '%', which crashes the logging path when it
@@ -446,8 +473,6 @@ local MOVED_DEFAULTS = {
 	-- picked up by loadouts.snapshot; the launcher writes it, nothing reads it
 	-- but the launcher.
 	launch_rung = "",
-	vote_auto = true,
-	vote_delay_seconds = 20,
 	vote_tiebreak = "host",
 	objective_enabled = true,
 	objective_side_missions = true,
@@ -597,11 +622,6 @@ mod.my_vote = function ()
 	return net.my_vote()
 end
 
--- Is this player looking at the vote screen?
-mod.vote_view_open = function ()
-	return Managers.ui ~= nil and Managers.ui:view_active(VOTE_VIEW)
-end
-
 -- "This player is reading something and cannot fight back", whichever thing it
 -- is. The one definition, because it has two consumers that must agree:
 -- pause.lua reports it to the other machines, and choice_shield reads it for the
@@ -614,11 +634,7 @@ end
 -- cannot move (the vote screen takes input) was the one left exposed, and it
 -- takes two people to see it.
 mod.local_choosing = function ()
-	if mod.choice_is_up and mod.choice_is_up() then
-		return true
-	end
-
-	return mod.vote_view_open()
+	return mod.choice_is_up ~= nil and mod.choice_is_up()
 end
 
 -- Which peer is on a card, for choice_shield.lua.
@@ -626,17 +642,6 @@ mod.peer_choosing = function (peer_id)
 	return net.peer_choosing(peer_id)
 end
 
--- Same again for chain.lua, which is io_dofile'd and must not carry its own
--- copy of net.lua either.
---
--- Two callers, and they cover different launches. This one is the mid-mission
--- one -- the launcher's "End run & begin" -- where the bus is still up at the
--- moment of the reset. The chain's own hop cannot use it: chain.launch runs
--- from the hub by then, long after the game session and the bus are gone, so
--- that announcement goes out from the complete_game_mode hook instead.
-mod.announce_hop = function (mission_name)
-	return net.announce_hop(mission_name)
-end
 _apply_moved_defaults()
 _init_loadouts()
 
@@ -806,6 +811,11 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 	-- Both roles, and before anything can read it: the last mission's vote is
 	-- not this mission's, and until a new one opens the screen would otherwise
 	-- offer the party the map they have just finished.
+	-- The swap landed; ordinary exits are the player's again.
+	continue_in_flight = 0
+	client_hold = 0
+	mod._client_hold_told = nil
+
 	net.reset_vote()
 
 	custom_buffs.register_network_lookup()
@@ -1234,12 +1244,16 @@ mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (s
 	-- after this point, so this is the last chance to read it.
 	run.capture()
 
+	-- Read before the role is cleared, which is the whole reason it happens
+	-- here: by the time the end screen exists nothing knows we were a guest.
+	if mod.role == ROLES.client then
+		client_hold = CLIENT_HOLD_SECONDS
+	end
+
 	mod.manager = nil
 	mod.game_mode = nil
 	mod.role = nil
 	capture_accum = 0
-	vote_opened_this_mission = false
-	vote_accum = 0
 
 	-- Only the flag: run.state().params must survive teardown for the end
 	-- screen to roll the next mission's options from.
@@ -1466,28 +1480,6 @@ mod:register_view({
 -- while the mission is being played. Standing still to read it is safe because
 -- the view reports itself as a choice in progress, which is what makes
 -- choice_shield protect the player -- exactly as it does for a buff card.
-mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/vote_view")
-mod:register_view({
-	view_name = VOTE_VIEW,
-	view_settings = {
-		init_view_function = function (ingame_ui_context)
-			return true
-		end,
-		state_bound = true,
-		path = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/vote_view",
-		class = "ChaosWastesVoteView",
-		disable_game_world = false,
-		load_always = true,
-		load_in_hub = false,
-		game_world_blur = 1.1,
-	},
-	view_transitions = {},
-	view_options = {
-		close_all = false,
-		close_previous = false,
-	},
-})
-
 -- The Mourningstar, or one of our own missions. Never the main menu.
 --
 -- The real requirement is chain.launch's: it waits on
@@ -1802,7 +1794,14 @@ mod:register_view({
 mod:hook(ProgressionManager, "game_score_end_time", function (func, self)
 	local end_time = func(self)
 
-	if not end_time or not run.is_active() then
+	-- run.is_active() is host-only -- state.active is written in _update_run,
+	-- which returns early for a client. Gating on it alone gave the host the
+	-- extra seconds and left every guest on the stock timer, so a guest's
+	-- scoreboard would close out from under them part-way through voting.
+	-- A client in a Realms session with a vote running needs the same clock.
+	local voting = net.vote_token() ~= nil
+
+	if not end_time or not (run.is_active() or voting) then
 		return end_time
 	end
 
@@ -1815,6 +1814,28 @@ mod:hook(ProgressionManager, "game_score_end_time", function (func, self)
 	-- The accessor returns milliseconds.
 	return end_time + extra_seconds * 1000
 end)
+
+-- What a card needs to draw itself on a machine that did not roll it.
+--
+-- Art is left out on purpose: mission_name resolves it locally from
+-- MissionTemplates, so sending it would be bytes for nothing.
+local function _vote_cards(options)
+	local cards = {}
+
+	for i = 1, #options do
+		local option = options[i]
+
+		cards[i] = {
+			label = chain.mission_display_name(option.mission_name),
+			mission_name = option.mission_name,
+			difficulty_label = option.difficulty_label,
+			modifiers_label = option.modifiers_label,
+			modifiers_detail = option.modifiers_detail,
+		}
+	end
+
+	return cards
+end
 
 -- Offer the next mission when the end screen opens on a won round. A loss is
 -- the end of the run, so no picker.
@@ -1844,21 +1865,17 @@ mod:hook_safe(StateGameScore, "on_exit", function (self)
 	mod._end_screen_up = false
 end)
 
+-- Offer the next mission when the end screen opens on a won round.
+--
+-- With other players connected this is also where the VOTE happens. The three
+-- cards go to every player's scoreboard and a click is a ballot, which is only
+-- possible as of Realms 0.4.0: its mod network no longer requires a live game
+-- session (SessionControl.is_available has no reference to one), so the end
+-- screen finally has a channel. Before that the vote had to run mid-mission.
 mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 	if not run.is_active() then
 		return
 	end
-
-	-- Consumed here whatever happens next, a loss included: a vote belongs to
-	-- the mission it was opened in, and one left behind would hand a later
-	-- picker three missions rolled for a run that is already over.
-	local voted_options = mod._vote_options
-	local voted_winner = mod._vote_winner
-	local voted_binding = mod._vote_binding
-
-	mod._vote_options = nil
-	mod._vote_winner = nil
-	mod._vote_binding = nil
 
 	local end_result = Managers.mechanism and Managers.mechanism:end_result()
 
@@ -1869,17 +1886,7 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 		return
 	end
 
-	-- What the party voted on, if they did. Rolling a fresh set here instead
-	-- would put three unrelated missions in front of the host and silently
-	-- discard the vote -- and the vote is the only thing the clients got a say
-	-- in, because during the mission is the only time there is a channel.
-	local options = voted_options
-	local default = voted_winner
-
-	if not options or #options == 0 then
-		options = chain.roll_options(run.state().params)
-		default = nil
-	end
+	local options = chain.roll_options(run.state().params)
 
 	if not options or #options == 0 then
 		mod:error("no eligible missions to continue the run with")
@@ -1891,38 +1898,78 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 	-- decision to end the run.
 	--
 	-- The end screen can finish before a click lands -- spamming continue
-	-- fires game_score_done early, the interception sees no selection, the
-	-- stock exit runs, and the click that arrives a moment later sets a value
-	-- nothing will ever read. The run dies to a race rather than to a choice.
+	-- fires the exit early, the interception sees no selection, the stock exit
+	-- runs, and the click that arrives a moment later sets a value nothing will
+	-- ever read. The run dies to a race rather than to a choice.
 	--
-	-- Selecting up front removes the race outright instead of papering over
-	-- it: the state is already correct when the screen opens, so it no longer
+	-- Selecting up front removes the race outright instead of papering over it:
+	-- the state is already correct when the screen opens, so it no longer
 	-- matters whether the player clicks, clicks late, or never clicks at all.
-	-- Clicking a different card simply replaces the default.
-	run.state().next_mission = default or options[1]
+	run.state().next_mission = options[1]
 
-	mod:debug_log("defaulting to", run.state().next_mission.mission_name,
-		default and "(the vote winner)" or "until another card is chosen")
+	-- A vote only when there is somebody to vote against. Solo, the picker
+	-- stays exactly what it has always been and a click is a decision, not a
+	-- ballot.
+	local party = net.connected_count() > 0
 
-	-- The view is told which card, not left to infer it. It used to hardcode
-	-- the first one as selected, so a vote that won on card 3 opened a screen
-	-- claiming card 1 -- and any click at all replaced the winner.
-	local selected_index = 1
+	mod._vote_options = party and options or nil
 
-	for i = 1, #options do
-		if options[i] == default then
-			selected_index = i
+	if party then
+		local cards = _vote_cards(options)
 
-			break
+		if not net.start_vote(cards) then
+			mod:error("could not put the next mission to a vote - falling back to the host choosing")
+
+			mod._vote_options = nil
+			party = false
 		end
 	end
 
+	mod:debug_log("end screen offering", #options, "mission(s);", party and "party vote" or "solo pick")
+
 	Managers.ui:open_view(RUN_SELECT_VIEW, nil, nil, nil, nil, {
 		options = options,
-		selected_index = selected_index,
-		locked = default ~= nil and voted_binding or false,
+		selected_index = 1,
+		vote = party,
 	})
 end)
+
+-- Client side: the same three cards, on their own scoreboard.
+--
+-- Polled rather than opened from the RPC handler. A Realms callback can now
+-- arrive with no game session and no UI manager at all (0.4.0 README, line 40),
+-- and the options routinely land before StateGameScore has presented anything.
+-- Watching for "end screen up, cards in hand, picker not open" is the condition
+-- that is actually true at the right moment.
+--
+-- Host-side this does nothing: the host opens its own picker above, and
+-- vote_token is only non-nil once a vote is running.
+local function _update_client_end_screen_picker(dt)
+	-- chain.is_realms_host, NOT mod.role: _destroy_buff_system nils the role
+	-- before this screen exists, so every machine looks role-less here. Realms'
+	-- own view of the connection is the only thing still true.
+	if not mod.end_screen_up() or chain.is_realms_host() then
+		return
+	end
+
+	if not Managers.ui or Managers.ui:view_active(RUN_SELECT_VIEW) then
+		return
+	end
+
+	local cards = net.vote_cards()
+
+	if #cards == 0 then
+		return
+	end
+
+	Managers.ui:open_view(RUN_SELECT_VIEW, nil, nil, nil, nil, {
+		options = cards,
+		selected_index = 1,
+		vote = true,
+	})
+
+	mod:info("opened the next-mission vote on the end screen (%d option(s))", #cards)
+end
 
 -- The exact point the run gets redirected.
 --
@@ -1936,12 +1983,45 @@ end)
 -- Hooked here rather than on MechanismManager.trigger_event because that is a
 -- generic dispatcher for every mechanism event in the game; this is the one
 -- function that actually means "the end screen is done".
+-- Turn the party's ballots into the run's choice.
+--
+-- Called from both end-screen exits, before either reads next_mission.
+-- Consumes mod._vote_options, so a second call is a no-op: the two exits can
+-- both be reached in some orderings and the winner must not be recomputed
+-- against a tally that has since moved on.
+--
+-- Silent and harmless solo -- there is no vote, and the card the player clicked
+-- is already in next_mission.
+local function _resolve_end_screen_vote()
+	local options = mod._vote_options
+
+	if type(options) ~= "table" or #options == 0 then
+		return
+	end
+
+	mod._vote_options = nil
+
+	local index, cast, note = net.vote_result()
+	local option = index and options[index]
+
+	if not option then
+		return
+	end
+
+	run.state().next_mission = option
+
+	mod:info("vote resolved: option %d (%s) with %d vote(s) cast%s",
+		index, tostring(option.mission_name), cast, note and (" - " .. note) or "")
+end
+
 -- Moves the chosen mission from "selected" to "queued for the hub". Shared,
 -- because the end screen has two exits and they do not meet: the timer path
 -- goes through game_score_done, while pressing continue calls
 -- multiplayer_session:leave("skip_end_of_round") and never touches the
 -- mechanism event at all.
 local function _queue_next_mission(via)
+	_resolve_end_screen_vote()
+
 	local next_mission = run.state().next_mission
 
 	if not next_mission then
@@ -1968,6 +2048,113 @@ end
 -- still happens -- we are not trying to keep the session alive -- we just
 -- record the choice first, so the hub relaunch picks it up exactly as it does
 -- on the timer path.
+-- Continue the run without leaving the session, if we can.
+--
+-- Returns true when it has taken responsibility for the transition, in which
+-- case the caller must SWALLOW whatever it was about to do. Returns false to
+-- mean "not my problem" -- solo, no Realms, nothing chosen, or the attempt
+-- failed -- and the ordinary hub path then runs untouched.
+--
+-- Deliberately fail-open. Both callers are the player's way off the
+-- end-of-round screen, so a refusal here has to leave them able to leave;
+-- swallowing an exit and then not transitioning would strand the whole party on
+-- the scoreboard with no way forward.
+local function _try_continue_in_session(via)
+	if not chain.is_realms_host() then
+		return false
+	end
+
+	_resolve_end_screen_vote()
+
+	local next_mission = run.state().next_mission
+
+	if not next_mission then
+		return false
+	end
+
+	local mission = MissionTemplates[next_mission.mission_name]
+
+	if not mission then
+		return false
+	end
+
+	-- Same mechanism only.
+	--
+	-- Realms' score-screen route broadcasts its preparation snapshot AFTER
+	-- change_mechanism rather than before, so a client can receive
+	-- rpc_set_mechanism against a stale context and be kicked with
+	-- "realms_invalid_mechanism_context". adventure -> adventure is safe because
+	-- both the saved and the incoming name are "adventure"; anything crossing
+	-- mechanisms is not, and falls back to the hub path.
+	local current = Managers.mechanism and Managers.mechanism:mechanism_name()
+
+	if current ~= mission.mechanism_name then
+		mod:info("not continuing in-session: %s -> %s crosses mechanisms",
+			tostring(current), tostring(mission.mechanism_name))
+
+		return false
+	end
+
+	-- Attempted before any bookkeeping, so a failure leaves the run state
+	-- exactly as the hub path expects to find it -- including next_mission,
+	-- which _queue_next_mission still needs.
+	local ok, started = pcall(chain.continue_run, next_mission)
+
+	if not ok or not started then
+		mod:error("could not continue in-session (%s): %s - falling back to the hub",
+			tostring(via), ok and "refused" or tostring(started))
+
+		return false
+	end
+
+	run.state().next_mission = nil
+	run.state().missions_completed = run.state().missions_completed + 1
+	run.arm_restore()
+
+	if Managers.ui and Managers.ui:view_active(RUN_SELECT_VIEW) then
+		Managers.ui:close_view(RUN_SELECT_VIEW)
+	end
+
+	continue_in_flight = CONTINUE_IN_FLIGHT_SECONDS
+
+	mod:info("continued the run in-session via %s; run depth now %d",
+		tostring(via), run.state().missions_completed)
+
+	return true
+end
+
+-- The end screen has three ways out and they land in two different places.
+--
+-- The timer (state_game_score.lua:84-97) and the player-summary continue
+-- (end_player_view.lua:273 -> StateGameScore._continue) both fire
+-- game_score_done. The main Continue button does NOT: it calls
+-- multiplayer_session:leave("skip_end_of_round") directly
+-- (end_view.lua:561-571), which reaches _leave -> shutdown_connections and
+-- drops every peer.
+--
+-- So both seams are intercepted, and both call the same function. Keeping two
+-- copies of "what happens when the end screen ends" in step is exactly what
+-- failed here before.
+--
+-- game_score_done is caught at the DISPATCHER, not at
+-- MechanismAdventure.game_score_done: the event is EVENT_TYPES.all, so
+-- trigger_event fans it out to every client before running the local handler
+-- (mechanism_manager.lua:336-343). Swallowing the handler alone would still
+-- send the clients off to leave.
+mod:hook(MechanismManager, "trigger_event", function (func, self, event, ...)
+	if event == "game_score_done" then
+		if continue_in_flight > 0 then
+			return
+		end
+
+		if _try_continue_in_session("end screen finished") then
+			return
+		end
+	end
+
+	return func(self, event, ...)
+end)
+
 -- One hook doing two jobs, because it has to be one.
 --
 -- A second mod:hook* on the same method from the same mod is logged as a rehook
@@ -1983,6 +2170,32 @@ mod:hook(MultiplayerSessionManager, "leave", function (func, self, reason)
 		mod:info("leaving the mission but staying in the strike team")
 
 		reason = escape.KEEP_PARTY_REASON
+	end
+
+	-- Swallowed entirely, not merely observed: leave() records _leave_reason and
+	-- the deferred _leave then calls shutdown_connections
+	-- (multiplayer_session_manager.lua:110-120). Calling through would drop the
+	-- party a frame or two into the transition we just started.
+	if reason == "skip_end_of_round" then
+		if continue_in_flight > 0 then
+			return
+		end
+
+		-- A guest waiting on the host. Swallowed, and said out loud once --
+		-- a key that silently does nothing reads as the game being stuck.
+		if client_hold > 0 then
+			if not mod._client_hold_told then
+				mod._client_hold_told = true
+
+				mod:echo(mod:localize("waiting_for_host"))
+			end
+
+			return
+		end
+
+		if _try_continue_in_session("continue pressed") then
+			return
+		end
 	end
 
 	local result = func(self, reason)
@@ -2030,30 +2243,8 @@ local function _update_pending_launch(dt)
 	if not state.pending_launch then
 		hub_settle_accum = 0
 
-		-- Cheap no-op unless it is actually held, which it only is between
-		-- queueing a launch and making it.
-		net.hold_admission(false)
-
 		return
 	end
-
-	-- Shut the door for the whole of this window, not just once the hub has
-	-- finished loading.
-	--
-	-- Moving a run on re-hosts twice, not once: leaving the mission stands up a
-	-- Mourningstar session (SoloMourningstar makes the hub a local session, and
-	-- Realms turns that into a listen server on the same address), and launching
-	-- then tears that down for the mission. Anyone rejoining lands on whichever
-	-- happens to be listening when they knock -- measured 2026-09-01, a peer
-	-- dropped at 22:33 and the real launch was not until 22:34:12, fifty seconds
-	-- of open door in between.
-	--
-	-- Gating this on the hub game mode meant the door stayed open for the load
-	-- that precedes it, which is most of that window. Anything with a
-	-- pending_launch is on its way to a mission and has no business accepting
-	-- joins, whatever it is currently showing. The client re-arms itself if it
-	-- does land early, but not colliding at all is better than recovering.
-	net.hold_admission(true)
 
 	local game_mode = Managers.state and Managers.state.game_mode
 	local game_mode_name = game_mode and game_mode:game_mode_name()
@@ -2229,11 +2420,14 @@ mod.update = function (dt)
 	-- previous frame's.
 	choice_shield.update(dt)
 	custom_buffs.update(dt)
+	_update_client_end_screen_picker(dt)
 
-	-- Guarded: this is assigned far below, and a mod reload that fails partway
-	-- through the file would otherwise nil-call it every frame.
-	if update_vote_trigger then
-		update_vote_trigger(dt)
+	if continue_in_flight > 0 then
+		continue_in_flight = continue_in_flight - (dt or 0)
+	end
+
+	if client_hold > 0 then
+		client_hold = client_hold - (dt or 0)
 	end
 	net.update(dt)
 end
@@ -2329,265 +2523,8 @@ end
 --
 -- Takes an explicit command for now so it can be exercised without playing a
 -- mission to completion; the automatic trigger comes when the commit hook does.
--- Resolve the open vote into the run's own next-mission slot.
---
--- This used to hand the winner straight to Realms with change_mechanism, on the
--- theory that Realms would defer it, keep the party and skip the reconnect. It
--- does not: Preparation only reaches its completing transition from the
--- `waiting` phase, which only a host re-boot can set, so a bare mechanism change
--- dead-ends in a loading screen that never resolves. chain.lua carries the
--- reasoning. The hop is a re-host, and the clients come back to it.
---
--- So all this does now is decide which mission, and it decides it here rather
--- than at the end screen because during the mission is the only time there is a
--- channel to have voted over.
---
--- Returns a reason string when it declines, because every one of them is a thing
--- worth seeing in a log rather than a silent no-op.
-local function _resolve_vote()
-	if not mod.is_host() then
-		return "not the host"
-	end
 
-	local options = mod._vote_options
 
-	if type(options) ~= "table" or #options == 0 then
-		return "no vote was opened"
-	end
-
-	local index, cast, note = net.vote_result()
-
-	if not index then
-		return "no vote is open"
-	end
-
-	local option = options[index]
-
-	if not option then
-		return "the winning option no longer exists"
-	end
-
-	mod:info("vote resolved: option %d (%s) with %d vote(s) cast%s",
-		index, tostring(option.mission_name), cast,
-		note and (" - " .. note) or "")
-
-	-- Left in mod._vote_options on purpose. The end screen reads all three back
-	-- so the picker shows the missions the party voted on, with this one
-	-- selected, instead of rolling a fresh unrelated set.
-	mod._vote_winner = option
-
-	-- Whether the picker may still be overridden.
-	--
-	-- Solo, the vote is a debug command and the picker is the real interface --
-	-- locking it would take the choice away from the only person making one.
-	-- With anyone else connected the vote *is* the decision, and a host quietly
-	-- clicking past it on a screen nobody else can see is the whole reason the
-	-- vote exists.
-	mod._vote_binding = net.connected_count() > 0
-
-	return nil
-end
-
--- The last moment there is a bus.
---
--- complete_game_mode runs inside gameplay; StateGameScore is a top-level game
--- state, so by the end-of-round screen MissionCleanupUtilies has disconnected
--- the game session and Realms' mod network is gone with it. Anything the clients
--- need to be told about what happens next has to be said here.
---
--- Two things are said: the vote is resolved, and the hop is announced. The
--- announcement is not conditional on the vote -- a host who never opened one
--- still re-hosts, and the clients still have to know to follow.
---
--- hook_safe: the original must run whatever happens here. Ending the mission is
--- not ours to prevent.
-mod:hook_safe("GameModeManager", "complete_game_mode", function (self, reason, triggered_from_flow)
-	if not mod.has_authority() or not run.is_active() then
-		return
-	end
-
-	local declined = _resolve_vote()
-
-	if declined then
-		mod:info("no vote to resolve: %s", declined)
-	end
-
-	-- The name is for the clients' log line and echo only; the host is still
-	-- free to pick a different card on the end screen, and nothing on the client
-	-- side reads it back. What matters is that a drop is coming and it is ours.
-	local winner = mod._vote_winner
-
-	net.announce_hop(winner and winner.mission_name or nil)
-end)
-
--- Resolve the vote on demand, so the first time this runs is a moment you chose
--- rather than the end of a real mission.
---
--- Does not announce a hop: there is no hop until the mission ends, and telling
--- clients to reconnect while everyone is still playing would drop them for
--- nothing.
-mod:command("cw_vote_close", mod:localize("command_cw_vote_close"), function ()
-	local declined = _resolve_vote()
-
-	if declined then
-		mod:echo(string.format("Chaos Wastes at Home: %s", declined))
-
-		return
-	end
-
-	mod:echo(mod:localize("vote_closed", chain.mission_display_name(mod._vote_winner.mission_name)))
-end)
-
--- Roll the next mission's options and put them to the party.
---
--- Shared by the command and the automatic trigger below, so both open exactly
--- the same vote. Returns nil on success, a reason string otherwise.
-local function _open_vote()
-	if not mod.is_host() then
-		return "vote_host_only"
-	end
-
-	local options = chain.roll_options(run.state().params)
-
-	if not options or #options == 0 then
-		return "vote_no_options"
-	end
-
-	-- Everything a card needs to draw itself on a machine that did not roll it.
-	-- Art is left out on purpose: mission_name resolves it locally from
-	-- MissionTemplates, so sending it would be bytes for nothing.
-	local cards = {}
-
-	for i = 1, #options do
-		local option = options[i]
-
-		cards[i] = {
-			label = chain.mission_display_name(option.mission_name),
-			mission_name = option.mission_name,
-			difficulty_label = option.difficulty_label,
-			modifiers_label = option.modifiers_label,
-			modifiers_detail = option.modifiers_detail,
-		}
-	end
-
-	mod._vote_options = options
-
-	if not net.start_vote(cards) then
-		return "vote_no_options"
-	end
-
-	return nil
-end
-
--- The vote goes up at the start of the mission, not the end of it.
---
--- Everyone has the whole mission to look at the three cards, argue about them
--- and change their mind, and nobody has to stop and read anything at the moment
--- the map is at its busiest. It also removes the question that made this hard:
--- Darktide marks no objective as the last one, so "near the end" could only ever
--- have been approximated from main-path progress -- a measure that is not even a
--- percentage on the maps that are not a single path.
---
--- The delay is for the party, not the mission: a client that is still loading
--- has no gameplay-control channel yet, and options sent before it arrives reach
--- nobody. So this waits for peers to be reachable, and falls through on the
--- timer for the solo case where there is nobody to wait for.
-local VOTE_PEER_WAIT_SECONDS = 45
-
-update_vote_trigger = function (dt)
-	if vote_opened_this_mission or not mod:get("vote_auto") then
-		return
-	end
-
-	-- has_authority, not is_host: only the machine that decides should roll the
-	-- options, and it needs a live game session to have peers to send them to.
-	if not mod.has_authority() or not run.is_active() then
-		return
-	end
-
-	vote_accum = vote_accum + (dt or 0)
-
-	if vote_accum < (mod:get("vote_delay_seconds") or 20) then
-		return
-	end
-
-	-- Hold a little longer if somebody is attached but not yet reachable --
-	-- Realms only delivers to a channel that has finished its handshake, so a
-	-- vote opened over a still-loading client is a vote they never see. Capped,
-	-- because a peer that never becomes ready must not stop the host voting.
-	if net.connected_count() > 0 and #net.peer_ids() < net.connected_count()
-		and vote_accum < VOTE_PEER_WAIT_SECONDS then
-		return
-	end
-
-	-- Set before the attempt, not after. A roll that fails will fail again next
-	-- frame, and retrying it sixty times a second would bury the log.
-	vote_opened_this_mission = true
-
-	local reason = _open_vote()
-
-	if reason then
-		mod:info("could not open the automatic vote: %s", reason)
-
-		return
-	end
-
-	mod:info("vote opened %ds into the mission, %d peer(s) reachable",
-		math.floor(vote_accum), #net.peer_ids())
-
-	mod:echo(mod:localize("vote_auto_opened"))
-end
-
--- Open or close the vote screen. Bound to a key, and available to both roles --
--- a client votes through exactly the same screen the host does.
---
--- Parked on the mod table because DMF keybinds of type function_call resolve
--- their function_name against it.
-mod.toggle_vote = function ()
-	if not Managers.ui then
-		return
-	end
-
-	if Managers.ui:view_active(VOTE_VIEW) then
-		Managers.ui:close_view(VOTE_VIEW)
-
-		return
-	end
-
-	-- Only inside one of our own missions. The view is registered for gameplay
-	-- states, so asking for it in the Mourningstar is not a no-op, it is an
-	-- error.
-	if not mod.manager then
-		mod:echo(mod:localize("vote_none_open"))
-
-		return
-	end
-
-	-- Opened whether or not a vote is running. A key that does nothing is a key
-	-- you press twice wondering if it registered; the screen says the vote has
-	-- not opened yet, and fills itself in when it does.
-	Managers.ui:open_view(VOTE_VIEW, nil, nil, nil, nil, {
-		options = mod.vote_options and mod.vote_options() or {},
-	})
-end
-
-mod:command("cw_vote_view", mod:localize("command_cw_vote_view"), mod.toggle_vote)
-
-mod:command("cw_vote_open", mod:localize("command_cw_vote_open"), function ()
-	local reason = _open_vote()
-
-	if reason then
-		mod:echo(mod:localize(reason))
-
-		return
-	end
-
-	mod:echo(mod:localize("vote_opened"))
-
-	for _, line in ipairs(net.vote_report()) do
-		mod:echo(line)
-	end
-end)
 
 -- Cast a vote, either role. On the host it records locally; on a client it goes
 -- to the host, which owns the tally.
@@ -2657,16 +2594,6 @@ end)
 --
 -- Either role, and deliberately not gated on anything: if somebody is watching
 -- failed join attempts go by, the command that stops them must work.
-mod:command("cw_rejoin_stop", mod:localize("command_cw_rejoin_stop"), function ()
-	if net.cancel_hop("asked to stop") then
-		mod:echo(mod:localize("hop_cancelled"))
-
-		return
-	end
-
-	mod:echo(mod:localize("hop_nothing_to_cancel"))
-end)
-
 mod:command("cw_peers", mod:localize("command_cw_peers"), function ()
 	for _, line in ipairs(net.report()) do
 		mod:echo(line)

@@ -446,6 +446,118 @@ chain.arm_main_menu_launch = function (mission_context)
 	return true
 end
 
+-- ---------------------------------------------------------------------------
+-- Continuing a run without breaking the session
+-- ---------------------------------------------------------------------------
+
+-- Are we hosting a live Realms session?
+--
+-- Asked of Realms rather than inferred, and asked at the end-of-round screen --
+-- where this mod's own role bookkeeping is already gone, because
+-- _destroy_buff_system nils mod.role before the screen appears. Session.is_active_host
+-- reads the live connection, which survives the mission it was made in.
+local function _realms_session()
+	local realms = get_mod and get_mod("Realms")
+
+	if not realms or not realms._session then
+		return nil
+	end
+
+	return realms._session
+end
+
+chain.is_realms_host = function ()
+	local realms = get_mod and get_mod("Realms")
+
+	if not realms then
+		return false
+	end
+
+	-- Realms 0.5.1 added `enable_server`, which players turn off to keep local
+	-- games single-player. Honour it: with it off the run chains through the
+	-- Mourningstar exactly as it does with Realms absent.
+	--
+	-- It is not merely a preference to respect, it is load-bearing. The setting
+	-- gates the two functions this whole approach rests on --
+	-- `intercept_host_reset`, which parks the reset instead of performing it,
+	-- and `replace_singleplayer_boot`, which hands back the same session. With
+	-- it off both fall through to the real thing, so continue_run would
+	-- genuinely tear the session down after we had already swallowed the
+	-- player's way off the end screen.
+	--
+	-- A live host connection outlives the setting being switched off mid-session,
+	-- so is_active_host alone no longer promises the reset is survivable.
+	--
+	-- Tested `== false`, not falsily: on Realms 0.4.0 the setting does not exist
+	-- and reads nil, which must keep meaning "supported".
+	if type(realms.get) == "function" then
+		local ok_setting, enabled = pcall(realms.get, realms, "enable_server")
+
+		if ok_setting and enabled == false then
+			return false
+		end
+	end
+
+	local session = _realms_session()
+
+	if not session or type(session.is_active_host) ~= "function" then
+		return false
+	end
+
+	local ok, active = pcall(session.is_active_host)
+
+	return ok and active or false
+end
+
+-- Move a live Realms session to the next mission with everyone still in it.
+--
+-- The same three calls chain.launch makes, and the differences are all in what
+-- is NOT here:
+--
+--   * No Promise poll. `leaving_game_session` is computed as
+--     `Managers.state.game_session ~= nil` (Realms session.lua:373), which is
+--     false at the end-of-round screen -- so the poll chain.launch uses would
+--     never resolve. Under Realms there is nothing to wait for anyway.
+--   * No hop announcement and no reconnect. Nobody is disconnected.
+--
+-- ALL THREE CALLS MUST BE IN ONE FRAME. Realms parks the reset rather than
+-- performing it (`intercept_host_reset`), and applies any parked reset at the
+-- first line of its own update (session.lua:692). A frame between the reset and
+-- the boot therefore tears the session down for real, which is the one way to
+-- turn this into exactly the bug it replaces.
+--
+-- The reset and the boot look pointless here -- neither destroys anything -- but
+-- they are load-bearing: the boot is what arms Realms' `reused_host_boot_pending_change`,
+-- which is what calls `host_transition_started` and re-arms the preparation
+-- phase machine. change_mechanism on its own leaves the phase at `started`,
+-- host_installed() stays false, and the transition never completes. That is the
+-- dead-end this mod spent three sessions on in 0.2.0, still reachable in 0.4.0
+-- by taking the shortcut.
+chain.continue_run = function (mission_context)
+	local mission = MissionTemplates[mission_context.mission_name]
+
+	if not mission then
+		mod:error("cannot continue into unknown mission '%s'", tostring(mission_context.mission_name))
+
+		return false
+	end
+
+	mod:info("continuing the run in-session: %s (challenge %s, resistance %s, %s)",
+		tostring(mission_context.mission_name),
+		tostring(mission_context.challenge),
+		tostring(mission_context.resistance),
+		mission_context.havoc_data
+			and ("havoc_data " .. tostring(mission_context.havoc_data))
+			or ("circumstance " .. tostring(mission_context.circumstance_name)))
+
+	Managers.multiplayer_session:reset("ChaosWastesAtHome run continuing")
+	Managers.multiplayer_session:boot_singleplayer_session()
+	Managers.mechanism:change_mechanism(mission.mechanism_name, mission_context)
+	Managers.mechanism:trigger_event("all_players_ready")
+
+	return true
+end
+
 chain.launch = function (mission_context)
 	local mission = MissionTemplates[mission_context.mission_name]
 
@@ -484,24 +596,6 @@ chain.launch = function (mission_context)
 	-- every call, while the main script that parks the accessor only re-runs on
 	-- an actual mod reload -- so a redeployed chain.lua can find itself running
 	-- against a main script from before the accessor existed.
-	local announced = mod.announce_hop and mod.announce_hop(mission_context.mission_name)
-
-	-- Say so when there are people attached who could not be told.
-	--
-	-- The reset below drops them either way. If the announcement went out they
-	-- rejoin by themselves; if it did not -- no gameplay-control bus outside a
-	-- mission, which is the case this cannot rule out from the hub -- they are
-	-- simply gone, and the host is the only one in a position to know that and
-	-- say "rejoin me". Silence here reads as the mod having lost them.
-	if not announced and mod.has_peers then
-		local ok, peers = pcall(mod.has_peers)
-
-		if ok and peers then
-			mod:echo(mod:localize("launch_peers_manual_rejoin"))
-			mod:info("launching with peers attached but no announcement delivered - they must rejoin by hand")
-		end
-	end
-
 	Managers.multiplayer_session:reset("ChaosWastesAtHome run continuing")
 	Managers.multiplayer_session:boot_singleplayer_session()
 

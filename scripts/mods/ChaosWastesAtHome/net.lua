@@ -27,7 +27,6 @@ local RPC_IDENT_REPLY = "cwah_ident_reply"
 local RPC_OPTIONS = "cwah_options"
 local RPC_VOTE = "cwah_vote"
 local RPC_CHOOSING = "cwah_choosing"
-local RPC_HOP = "cwah_hop"
 local RPC_TALLY = "cwah_tally"
 
 -- Re-sent on a timer as well as on becoming available: Realms' bus comes up
@@ -55,13 +54,6 @@ if not state then
 		-- [peer_id] = os-free timestamp-less flag: is that peer still on a card
 		choosing = {},
 		local_choosing = false,
-		-- Client side: an announced re-host we are waiting to follow.
-		hop = nil,
-		-- Host side: the ConnectionHost we have closed to joins, if any. The
-		-- object and not a boolean, because a listen host is destroyed and
-		-- rebuilt on every hop and a plain flag would outlive the thing it
-		-- described -- claiming a fresh, wide-open lobby was already shut.
-		admission_held_host = nil,
 	}
 	mod._net_state = state
 end
@@ -434,6 +426,17 @@ net.vote_result = function ()
 	return leaders[1], cast, "tied - settled by card order"
 end
 
+-- Are we the client side of the vote?
+--
+-- Asked of the vote state, NOT of mod.role. Everything here now runs on the
+-- end-of-round screen, and _destroy_buff_system nils mod.role before that
+-- screen exists -- so a role test answers "neither" for everybody and every
+-- branch below would silently take the host path. A client has a client_vote
+-- and no vote; the host has the reverse.
+local function _is_vote_client()
+	return state.client_vote ~= nil and state.vote == nil
+end
+
 -- Either role: record a choice. On the host that is a local vote; on a client
 -- it goes to the host.
 net.cast_vote = function (index)
@@ -446,7 +449,7 @@ net.cast_vote = function (index)
 	local realms = _realms()
 
 	-- Client: send it. The host owns the tally.
-	if mod.role == "client" then
+	if _is_vote_client() then
 		if not realms or not realms.network_is_available() then
 			return false, "no connection to the host"
 		end
@@ -495,7 +498,7 @@ end
 -- honest about what a client can see -- it has no channel that carries the
 -- others' votes back -- and still confirms the click landed.
 net.vote_counts = function ()
-	if mod.role == "client" then
+	if _is_vote_client() then
 		local client_vote = state.client_vote
 
 		if not client_vote then
@@ -549,7 +552,7 @@ end
 -- shows as selected too -- and so reopening the screen still shows what you
 -- picked instead of looking as though you had not voted.
 net.my_vote = function ()
-	if mod.role == "client" then
+	if _is_vote_client() then
 		return state.client_vote and state.client_vote.choice
 	end
 
@@ -559,7 +562,7 @@ end
 -- Which round is running, or nil. The vote screen watches this so it can fill
 -- itself in if the vote opens while it is already on screen.
 net.vote_token = function ()
-	if mod.role == "client" then
+	if _is_vote_client() then
 		return state.client_vote and state.client_vote.token
 	end
 
@@ -569,7 +572,7 @@ end
 -- The options as the vote view needs them, from whichever side is asking. Empty
 -- when no vote is open, which the vote screen shows rather than refuses.
 net.vote_cards = function ()
-	if mod.role == "client" then
+	if _is_vote_client() then
 		return state.client_vote and state.client_vote.cards or {}
 	end
 
@@ -580,7 +583,7 @@ net.vote_report = function ()
 	local lines = {}
 	local vote = state.vote
 
-	if mod.role == "client" then
+	if _is_vote_client() then
 		local client_vote = state.client_vote
 
 		if not client_vote then
@@ -698,6 +701,42 @@ end
 -- Reported on change rather than per frame: this is two or three messages per
 -- card, not sixty a second.
 
+-- Tell the others when our own card goes up or down.
+--
+-- This existed, was deleted in 0.11.2 along with the synchronised pause, and
+-- nothing noticed for four releases: pause.lua calls it through `mod.report_choosing`
+-- inside a pcall, so the nil call was swallowed once a frame rather than raised.
+-- With no sender, `cwah_choosing` was never transmitted, `net.peer_choosing`
+-- answered false for everyone, and choice_shield protected nobody but the
+-- player running it. Peers were unprotected from 0.11.2 onward.
+--
+-- Sent on change, not per frame -- two or three messages per card.
+net.set_local_choosing = function (choosing)
+	choosing = choosing and true or false
+
+	if choosing == state.local_choosing then
+		return
+	end
+
+	state.local_choosing = choosing
+
+	local realms = _realms()
+
+	if not realms then
+		return
+	end
+
+	local ok, available = pcall(realms.network_is_available)
+
+	if not ok or not available then
+		return
+	end
+
+	-- "all", not "others": the host is a recipient like anyone else, and a
+	-- client's card only matters to the host, which is who acts on it.
+	realms.network_send(mod, RPC_CHOOSING, "all", { choosing = choosing })
+end
+
 local function _on_choosing(sender_peer_id, payload)
 	if type(payload) ~= "table" then
 		return
@@ -729,558 +768,6 @@ net.forget_peer = function (peer_id)
 end
 
 -- ---------------------------------------------------------------------------
--- Following the host to the next mission
--- ---------------------------------------------------------------------------
---
--- A hop is a re-host. chain.launch resets the multiplayer session and boots a
--- new one, Realms turns that into a fresh listen server, and every client is
--- dropped on the way through -- see chain.lua for why the party-preserving
--- alternative does not exist.
---
--- So the clients have to come back by themselves, and the only thing they need
--- in order to do that is to know the drop was deliberate. That is this message.
--- Without it a reconnect loop would also fire when the host simply quits, which
--- is the one thing worse than not reconnecting at all.
---
--- Sent while the mission is still live, because that is the last moment there is
--- a channel: StateGameScore is a top-level game state, so the gameplay session
--- and Realms' bus are both gone by the end-of-round screen.
-
--- How long we will chase a host that has actually gone. Counted from the drop,
--- not from the announcement: the announcement lands at the end of the mission
--- and the host then has an outro, an end screen and a hub load to get through
--- before it resets anything, which on a slow load is minutes. Counting from the
--- announcement would expire the hop before the hop happened.
-local HOP_WINDOW = 240
-
--- Backstop on the other half -- how long an announced-but-unexecuted hop stays
--- armed. A host who announces and then abandons the run would otherwise leave a
--- client that reconnects to a quit an hour later.
-local HOP_ARMED_MAX = 900
-
--- Waited out after the connection actually drops, before the first attempt.
--- The host is mid-teardown at that point and has not called
--- Native.start_local_session yet, so an immediate attempt is guaranteed to miss.
-local HOP_FIRST_DELAY = 5
-local HOP_RETRY_SECONDS = 6
-local HOP_MAX_ATTEMPTS = 20
-
--- How long attached-and-quiet counts as arrived when there is no game mode to
--- read. A preparation lobby has none, and neither does a level still loading --
--- the two are indistinguishable at a glance, so this waits long enough for a
--- load to resolve into something and then calls it done.
-local HOP_SETTLE_SECONDS = 8
-
--- A hub landing re-arms rather than finishing, which is right but must not be
--- unbounded: without a cap, bouncing in and out of the host's Mourningstar
--- resets the chase clock every time and the hop never expires on its own.
-local HOP_MAX_REARMS = 3
-
--- Are we still attached to a Realms host right now?
---
--- host_type rather than the bus: ModNetwork.is_available() needs a live game
--- session, so it goes false at the end-of-round screen while the connection is
--- still perfectly good. Reading that as "dropped" would start reconnecting
--- before the host had gone anywhere.
-local function _attached_to_host()
-	local session_manager = Managers.multiplayer_session
-
-	if not session_manager then
-		return false
-	end
-
-	local ok, host_type = pcall(session_manager.host_type, session_manager)
-
-	if not ok or host_type ~= HOST_TYPES.player then
-		return false
-	end
-
-	local connection = Managers.connection
-
-	if not connection then
-		return false
-	end
-
-	local ok_client, is_client = pcall(connection.is_client, connection)
-
-	return ok_client and is_client or false
-end
-
--- What we are in, once we are in something. nil while loading, which is a
--- distinct answer from "a mission" and has to stay that way.
-local function _current_game_mode_name()
-	local game_mode = Managers.state and Managers.state.game_mode
-
-	if not game_mode then
-		return nil
-	end
-
-	local ok, name = pcall(game_mode.game_mode_name, game_mode)
-
-	return ok and name or nil
-end
-
--- Where to reconnect to, from Realms' own saved setting.
---
--- join_view.lua writes join_server_address on every edit of its address field,
--- so the last thing the player typed to get here is already on disk. Parsed
--- here rather than through Realms' JoinTarget module because that is a private
--- file path, while `host:port` (or `[v6]:port`) is the format the player is
--- shown and types.
---
--- The port survives the hop: measured 2026-08-30, a host re-listens on the same
--- port for the life of its process (60799 three times, 36093 twice), and a hop
--- does not restart the game. The announcement carries the host's current port
--- anyway, so a stale setting costs nothing.
-local function _stored_join_target()
-	local realms = _realms()
-
-	if not realms or type(realms.get) ~= "function" then
-		return nil
-	end
-
-	local ok, value = pcall(realms.get, realms, "join_server_address")
-
-	if not ok or type(value) ~= "string" or value == "" then
-		return nil
-	end
-
-	local address, port_text
-
-	if string.sub(value, 1, 1) == "[" then
-		address, port_text = string.match(value, "^%[([^%[%]]+)%]:([^:]+)$")
-	else
-		address, port_text = string.match(value, "^([^:]+):([^:]+)$")
-	end
-
-	if not address or address == "" or not port_text then
-		return nil
-	end
-
-	local port = string.match(port_text, "^%d+$") and tonumber(port_text) or nil
-
-	if not port or port < 1 or port > 65535 then
-		return nil
-	end
-
-	return address, port
-end
-
-local function _stored_password()
-	local realms = _realms()
-
-	if not realms or type(realms.get) ~= "function" then
-		return ""
-	end
-
-	local ok, value = pcall(realms.get, realms, "server_password")
-
-	return (ok and type(value) == "string") and value or ""
-end
-
--- Host: the port our listen server is on, so the announcement can carry it.
-local function _local_host_port()
-	local connection = Managers.connection
-	local host = connection and connection._connection_host
-
-	if not host or type(host.local_port) ~= "function" then
-		return nil
-	end
-
-	local ok, port = pcall(host.local_port, host)
-
-	return ok and port or nil
-end
-
--- Host: tell everyone a re-host is coming.
---
--- Returns false when there is nobody to tell, which is the solo case and is not
--- an error -- the caller hops either way.
-net.announce_hop = function (mission_name)
-	local realms = _realms()
-
-	if not realms then
-		return false
-	end
-
-	local ok, available = pcall(realms.network_is_available)
-
-	if not ok or not available then
-		mod:info("not announcing the hop: no gameplay-control bus (nobody could hear it)")
-
-		return false
-	end
-
-	local peers = net.peer_ids()
-
-	if #peers == 0 then
-		-- The solo case, and the one that looks like a bug when it is silent:
-		-- there is a bus (Realms answers is_available for a host with no peers)
-		-- but nobody on it. Logged so "did the hop announcement run?" has an
-		-- answer either way.
-		mod:info("no hop announcement sent: nobody is connected")
-
-		return false
-	end
-
-	local port = _local_host_port()
-
-	realms.network_send(mod, RPC_HOP, "others", {
-		mission_name = mission_name,
-		port = port,
-		version = mod.version,
-	})
-
-	mod:info("announced the hop to %d peer(s): next mission '%s', reconnect port %s",
-		#peers, tostring(mission_name), tostring(port))
-
-	return true
-end
-
-local function _on_hop(sender_peer_id, payload)
-	-- A host never follows anyone. Guarded rather than assumed, because a peer
-	-- that mis-set its role would otherwise reset its own session mid-mission.
-	if mod.role == "host" then
-		return
-	end
-
-	local address, port = _stored_join_target()
-
-	if type(payload) == "table" and tonumber(payload.port) then
-		-- The host's live port beats whatever we last typed.
-		port = tonumber(payload.port)
-	end
-
-	if not address then
-		mod:error("the host is hopping to the next mission, but no join address is saved - reconnect by hand")
-		mod:echo(mod:localize("hop_no_address"))
-
-		return
-	end
-
-	state.hop = {
-		address = address,
-		port = port,
-		password = _stored_password(),
-		mission_name = type(payload) == "table" and payload.mission_name or nil,
-		elapsed = 0,
-		armed_for = 0,
-		attempts = 0,
-		cooldown = 0,
-		waiting_for_drop = true,
-	}
-
-	mod:info("host announced a hop to '%s'; will rejoin %s:%s once this session drops",
-		tostring(state.hop.mission_name), tostring(address), tostring(port))
-
-	mod:echo(mod:localize("hop_incoming"))
-end
-
-local function _give_up_hop(why)
-	local hop = state.hop
-
-	state.hop = nil
-
-	mod:error("stopped trying to follow the host: %s (%d attempt(s) over %ds)",
-		why, hop and hop.attempts or 0, math.floor(hop and hop.elapsed or 0))
-
-	mod:echo(mod:localize("hop_gave_up"))
-end
-
-local function _update_hop(dt)
-	local hop = state.hop
-
-	if not hop then
-		return
-	end
-
-	hop.armed_for = hop.armed_for + (dt or 0)
-
-	if hop.armed_for > HOP_ARMED_MAX then
-		_give_up_hop("the host announced a hop and never made it")
-
-		return
-	end
-
-	if _attached_to_host() then
-		-- Still on a connection. Either the original one -- the host has not
-		-- reset yet -- or one we just re-established.
-		if hop.attempts == 0 then
-			hop.waiting_for_drop = true
-
-			return
-		end
-
-		-- The end-of-round screen is not somewhere to arrive.
-		--
-		-- If the host is slower through it than we are, a retry can succeed
-		-- against the session it has not finished leaving -- and that session is
-		-- about to be destroyed. It has no game mode, so it looks exactly like a
-		-- lobby to the check below, and calling it arrival disarms the rejoin
-		-- just before the drop that actually matters.
-		--
-		-- So it re-arms instead, like the Mourningstar does: wait here, and
-		-- chase again when this session goes.
-		if mod.end_screen_up and mod.end_screen_up() then
-			hop.attached_for = 0
-			hop.waiting_for_drop = true
-
-			if not hop.saw_end_screen then
-				hop.saw_end_screen = true
-
-				mod:info("rejoined into the end-of-round screen - that session is ending, waiting for the real one")
-			end
-
-			return
-		end
-
-		hop.attached_for = (hop.attached_for or 0) + (dt or 0)
-
-		local game_mode_name = _current_game_mode_name()
-
-		if not game_mode_name then
-			-- No game mode means one of two things and they look identical: a
-			-- level still loading, or a preparation lobby. Waiting a moment
-			-- tells them apart, because a load resolves into something and a
-			-- lobby does not.
-			--
-			-- Staying armed forever was the bug. Sitting in the host's lobby
-			-- left the hop live for its whole fifteen-minute cap, so when the
-			-- host later quit -- an ordinary thing to do from a lobby -- a hop
-			-- that had already succeeded fired a reconnect storm at an address
-			-- with nobody on it. Being attached to the host IS the arrival,
-			-- whatever screen it happens on.
-			if hop.attached_for < HOP_SETTLE_SECONDS then
-				return
-			end
-
-			mod:info("rejoined the host after %d attempt(s) - no mission yet, so this is a lobby",
-				hop.attempts)
-
-			mod:echo(mod:localize("hop_rejoined"))
-
-			state.hop = nil
-
-			return
-		end
-
-		-- The Mourningstar is a stop on the way, not the destination.
-		--
-		-- The host passes through the hub between missions, and with
-		-- SoloMourningstar installed that hub is a local session too -- so
-		-- Realms stands a listen server up for it and it answers on the same
-		-- address. A reconnect that lands there looks exactly like success,
-		-- and would clear the hop moments before the host resets again for the
-		-- real mission, dropping the client for good.
-		--
-		-- So a hub landing re-arms instead of finishing. The host also shuts
-		-- that lobby to joins while a launch is pending (net.hold_admission),
-		-- which should stop this being reachable at all; this is the half that
-		-- does not depend on the host's timing.
-		if game_mode_name == "hub" or game_mode_name == "prologue_hub" then
-			hop.rearms = (hop.rearms or 0) + 1
-
-			if hop.rearms == 1 then
-				mod:info("reconnected into the host's Mourningstar rather than the next mission - staying armed for the real hop")
-			end
-
-			if hop.rearms > HOP_MAX_REARMS then
-				-- Attached, in the Mourningstar, and no mission has come. That
-				-- is a party sitting in the hub, not a hop in progress.
-				mod:info("in the host's Mourningstar with no mission coming - treating the hop as done")
-				mod:echo(mod:localize("hop_rejoined"))
-
-				state.hop = nil
-
-				return
-			end
-
-			hop.waiting_for_drop = true
-			hop.elapsed = 0
-
-			return
-		end
-
-		mod:info("rejoined the host in '%s' after %d attempt(s)", game_mode_name, hop.attempts)
-		mod:echo(mod:localize("hop_rejoined"))
-
-		state.hop = nil
-
-		return
-	end
-
-	-- Detached. Only now does the chase clock run -- see HOP_WINDOW.
-	hop.attached_for = 0
-	hop.elapsed = hop.elapsed + (dt or 0)
-
-	if hop.elapsed > HOP_WINDOW then
-		_give_up_hop("the host never came back")
-
-		return
-	end
-
-	if hop.waiting_for_drop then
-		hop.waiting_for_drop = false
-		hop.cooldown = HOP_FIRST_DELAY
-
-		mod:info("the host's session has gone; first reconnect attempt to %s:%s in %ds",
-			tostring(hop.address), tostring(hop.port), HOP_FIRST_DELAY)
-
-		mod:echo(mod:localize("hop_reconnecting"))
-
-		return
-	end
-
-	hop.cooldown = hop.cooldown - (dt or 0)
-
-	if hop.cooldown > 0 then
-		return
-	end
-
-	hop.cooldown = HOP_RETRY_SECONDS
-
-	local realms = _realms()
-	local session = realms and realms._session
-
-	if not session or type(session.start_client) ~= "function" then
-		_give_up_hop("Realms exposes no _session.start_client")
-
-		return
-	end
-
-	hop.attempts = hop.attempts + 1
-
-	local ok, started, err = pcall(session.start_client, hop.address, hop.port, hop.password)
-
-	if not ok then
-		mod:error("reconnect attempt %d threw: %s", hop.attempts, tostring(started))
-	elseif started then
-		-- Accepted, not arrived: start_client only kicks the client boot off.
-		-- Left armed on purpose, so a boot that then fails is retried; the
-		-- attached branch above is what actually finishes the hop.
-		mod:info("reconnect attempt %d accepted, joining %s:%s",
-			hop.attempts, tostring(hop.address), tostring(hop.port))
-
-		hop.cooldown = HOP_RETRY_SECONDS * 2
-	else
-		-- Expected for the first few: the host is still loading, or our own
-		-- previous attempt is still in flight (error_join_already_pending).
-		mod:info("reconnect attempt %d refused: %s", hop.attempts, tostring(err))
-	end
-
-	if hop.attempts >= HOP_MAX_ATTEMPTS then
-		_give_up_hop("out of attempts")
-	end
-end
-
--- Stop trying to rejoin.
---
--- This existed, unused, and was removed as dead code -- and then a host quit
--- from a lobby and left somebody retrying against an address with nobody on it,
--- which is exactly what it was for. Wired to /cw_rejoin_stop now, and named in
--- the message that appears when reconnecting starts, so it can be found at the
--- moment it is wanted rather than looked up afterwards.
-net.cancel_hop = function (why)
-	if not state.hop then
-		return false
-	end
-
-	mod:info("cancelled the pending rejoin: %s (%d attempt(s))",
-		tostring(why), state.hop.attempts)
-
-	state.hop = nil
-
-	return true
-end
-
--- Host: shut the Mourningstar lobby while a launch is pending.
---
--- With SoloMourningstar installed the hub is a local session, so Realms turns it
--- into a listen server exactly like a mission -- same address, answering joins,
--- for the whole time the host is between missions. Anyone dialling in then lands
--- in the Mourningstar instead of the mission, which is a race a reconnecting
--- client can lose and a person typing an address can lose too.
---
--- Realms' own admission gate is the lever: can_accept_peer refuses with
--- SERVER_PRIVATE when accept_new_connections is false
--- (connection_host.lua:116-118), which is a clean refusal the client retries
--- past rather than a dropped connection.
---
--- Restored through Session.apply_settings rather than by remembering the old
--- value, so the reopen recomputes from the player's own Realms settings and
--- cannot get them wrong. Nothing is written to those settings at any point.
-net.hold_admission = function (holding)
-	holding = holding and true or false
-
-	local host = Managers.connection and Managers.connection._connection_host
-
-	-- Forget a hold that outlived its host. That is the normal ending, not an
-	-- error: the launch this was protecting is what destroyed it, and its
-	-- replacement booted open from the player's own settings.
-	if state.admission_held_host and state.admission_held_host ~= host then
-		state.admission_held_host = nil
-	end
-
-	if holding == (state.admission_held_host ~= nil) then
-		return true
-	end
-
-	local realms = _realms()
-
-	if not realms then
-		return false
-	end
-
-	if not holding then
-		state.admission_held_host = nil
-
-		local session = realms._session
-
-		if not session or type(session.apply_settings) ~= "function" then
-			mod:error("could not reopen the lobby: Realms exposes no _session.apply_settings")
-
-			return false
-		end
-
-		local ok = pcall(session.apply_settings)
-
-		mod:info("lobby reopened to joins%s", ok and "" or " (Realms refused to reapply its settings)")
-
-		return ok
-	end
-
-	if not host or type(host.set_admission_policy) ~= "function" then
-		return false
-	end
-
-	-- set_admission_policy overwrites all three fields, so the two we do not
-	-- mean to change have to be handed back as they are.
-	local ok_max, max_members = pcall(host.max_members, host)
-	local password = ""
-
-	if type(realms.get) == "function" then
-		local ok_password, value = pcall(realms.get, realms, "server_password")
-
-		password = (ok_password and type(value) == "string") and value or ""
-	end
-
-	local ok = pcall(host.set_admission_policy, host, false, ok_max and max_members or 4, password)
-
-	if not ok then
-		mod:error("could not close the lobby to joins while the run moves on")
-
-		return false
-	end
-
-	state.admission_held_host = host
-
-	mod:info("Mourningstar lobby closed to joins until the next mission is up")
-
-	return true
-end
-
-
--- ---------------------------------------------------------------------------
 -- Lifecycle
 -- ---------------------------------------------------------------------------
 
@@ -1300,7 +787,6 @@ net.install = function ()
 	local ok_c, err_c = realms.network_register(mod, RPC_OPTIONS, _on_options)
 	local ok_d, err_d = realms.network_register(mod, RPC_VOTE, _on_vote)
 	local ok_e, err_e = realms.network_register(mod, RPC_CHOOSING, _on_choosing)
-	local ok_f, err_f = realms.network_register(mod, RPC_HOP, _on_hop)
 	local ok_g, err_g = realms.network_register(mod, RPC_TALLY, _on_tally)
 
 	if not ok_g then
@@ -1309,11 +795,6 @@ net.install = function ()
 		return false
 	end
 
-	if not ok_f then
-		mod:error("could not register the mission-hop RPC: %s", tostring(err_f))
-
-		return false
-	end
 
 	if not ok_e then
 		mod:error("could not register the buff-choice RPC: %s", tostring(err_e))
@@ -1349,11 +830,6 @@ net.update = function (dt)
 		return
 	end
 
-	-- Before the registration and availability gates below, both of which are
-	-- false exactly when a hop is in progress -- there is no bus while the host
-	-- is re-hosting, which is the whole point of the hop being announced in
-	-- advance rather than negotiated at the time.
-	_update_hop(dt)
 
 	if not state.registered and not net.install() then
 		return
@@ -1523,13 +999,6 @@ net.report = function ()
 	lines[#lines + 1] = string.format("custom buffs %s",
 		net.custom_buffs_safe() and "ENABLED" or "SUPPRESSED")
 
-	local hop = state.hop
-
-	if hop then
-		lines[#lines + 1] = string.format("following the host to '%s' via %s:%s - %d attempt(s), %ds elapsed",
-			tostring(hop.mission_name), tostring(hop.address), tostring(hop.port),
-			hop.attempts, math.floor(hop.elapsed))
-	end
 
 	return lines
 end

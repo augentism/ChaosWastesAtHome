@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.2.2
+
+**Everyone in a session must be on this version.**
+
+- **Fixed players being dropped to the Mourningstar if they skipped the
+  end-of-round screen before the host moved the run on.** Only the host can
+  change mission, so a guest pressing Continue was leaving the session moments
+  before they would have been carried to the next one. Their Continue is now
+  held until the host goes, with a message saying so, and released after a
+  minute and a half if the host never does.
+
+## 1.2.1
+
+- Tested against **Realms 0.5.1**.
+- **Realms' "Enable Realms server" setting is respected.** Switch it off and
+  runs chain through the Mourningstar exactly as they do with Realms not
+  installed, rather than trying to move the party and finding there is no
+  session to keep.
+
+## 1.2.0
+
+**Requires Realms 0.4.0 or later for multiplayer**, and everyone in a session
+must be on this version of this mod.
+
+- **Nobody is disconnected between missions any more.** The run now moves the
+  whole party straight from the end-of-round screen into the next mission with
+  the session intact. Previously it restarted the host's session and had
+  everyone reconnect, which often did not land cleanly. All of that -- the
+  warnings, the automatic rejoin, `/cw_rejoin_stop` -- is gone rather than
+  fixed. Hammering Continue on the end screen is safe: every extra press is
+  held until the next mission is up, rather than the second one tearing the
+  session down behind the first.
+- **Voting moved to the end-of-round screen.** The three mission cards you have
+  always picked from are now shown to every player, and a click is a vote, with
+  the tally live on the cards. The separate mid-mission vote screen and its
+  keybind are retired, along with its settings.
+- **Fixed players other than the host never being protected while choosing a
+  buff.** The message saying "my card is up" stopped being sent in 0.11.2 and
+  the failure was silent, so the shield has only ever worked for the player
+  running it since then.
+
 ## 1.1.2
 
 **Everyone in a session must be on this version.**
