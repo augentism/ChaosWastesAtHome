@@ -399,12 +399,20 @@ end
 
 -- Counts what is actually off, which is no longer the same as the size of the
 -- disabled table: a default-off buff nobody has touched is in neither table.
+--
+-- Counted per distinct NAME, not per catalogue entry. The game lists the same
+-- buff under several groups -- every grenade buff appears under all six
+-- archetypes that have grenades, 21 names in all -- so walking the catalogue and
+-- incrementing blindly reported "6 buffs disabled" when the player had switched
+-- off one.
 buff_pool.disabled_count = function ()
 	local count = 0
+	local counted = {}
 
 	for _, group in ipairs(buff_pool.groups()) do
 		for _, name in ipairs(group.names) do
-			if not buff_pool.is_enabled(name) then
+			if not counted[name] and not buff_pool.is_enabled(name) then
+				counted[name] = true
 				count = count + 1
 			end
 		end
@@ -427,8 +435,13 @@ end
 -- Walks the catalogue rather than the stored table, because "off" is no longer
 -- the same as "stored as disabled" -- a default-off buff the player has never
 -- touched appears in neither set and would otherwise leak into the pool.
+--
+-- The count is per distinct NAME, for the same reason as disabled_count above:
+-- a buff listed under six archetypes is still one buff the player switched off,
+-- and this number is reported to them.
 buff_pool.apply_exclusions = function (exclude)
 	local count = 0
+	local counted = {}
 
 	for _, group in ipairs(buff_pool.groups()) do
 		for _, name in ipairs(group.names) do
@@ -437,7 +450,10 @@ buff_pool.apply_exclusions = function (exclude)
 					exclude[name] = true
 				end
 
-				count = count + 1
+				if not counted[name] then
+					counted[name] = true
+					count = count + 1
+				end
 			end
 		end
 	end

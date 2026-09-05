@@ -210,6 +210,16 @@ end
 -- carries the winner into the end-of-mission transition.
 
 local function _vote_counts(vote)
+	-- When VoxPopuli owns the vote the electorate is the stream, and its tally
+	-- is mirrored in here by the end-screen pump. Returning it from the same
+	-- function the players' count comes from is what makes everything
+	-- downstream work untouched: the cards draw it, _broadcast_tally ships it
+	-- to clients, and /cw_votes reports it, none of them knowing the
+	-- difference.
+	if vote.chat_counts then
+		return vote.chat_counts
+	end
+
 	local counts = {}
 
 	for _, index in pairs(vote.votes) do
@@ -223,9 +233,21 @@ end
 -- changed vote takes a new number, because moving to another card is a fresh
 -- commitment to it, not a retroactive one.
 local function _record_vote(vote, voter, index)
+	-- The single choke point for a ballot: a click here, a client's RPC in
+	-- _on_vote, and /cw_vote all end up in this function. Refusing here refuses
+	-- all three at once, which is why the check is not at any of the callers.
+	--
+	-- Viewers deciding means viewers deciding: with a chat vote open a player's
+	-- click is not a smaller vote, it is not a vote.
+	if vote.chat_owned then
+		return false
+	end
+
 	vote.sequence = vote.sequence + 1
 	vote.votes[voter] = index
 	vote.order[voter] = vote.sequence
+
+	return true
 end
 
 -- Host: push the running tally to everyone.
@@ -267,6 +289,12 @@ local function _broadcast_tally()
 	realms.network_send(mod, RPC_TALLY, "others", {
 		token = vote.token,
 		counts = dense,
+		-- Rides along with the tally rather than getting its own message:
+		-- ownership cannot change mid-round, and every tally already carries
+		-- the token that scopes it. A guest that joins late learns it from the
+		-- first tally it receives, which is also the first thing that gives it
+		-- numbers to draw.
+		chat_owned = vote.chat_owned == true,
 	})
 end
 
@@ -484,7 +512,11 @@ net.cast_vote = function (index)
 		return false, "no such option"
 	end
 
-	_record_vote(vote, "host", index)
+	if not _record_vote(vote, "host", index) then
+		-- Chat owns this round. Reported rather than swallowed so /cw_vote says
+		-- something, instead of claiming a ballot was cast that was not.
+		return false, "the viewers are deciding this one"
+	end
 
 	_broadcast_tally()
 
@@ -528,6 +560,69 @@ net.vote_counts = function ()
 	end
 
 	return _vote_counts(vote)
+end
+
+-- Hand this round over to VoxPopuli's viewers.
+--
+-- Called once, right after net.start_vote, so the cards and the token are
+-- already in place and only the electorate changes. Everything the vote screen
+-- and the client sync do carries on unchanged.
+net.set_chat_owned = function ()
+	local vote = state.vote
+
+	if not vote then
+		return false
+	end
+
+	vote.chat_owned = true
+	vote.chat_counts = {}
+
+	return true
+end
+
+--- Is the running vote chat's rather than the party's?
+--- Answered for clients too, which learn it from the tally broadcast -- a guest
+--- has to know not to expect its click to do anything.
+net.is_chat_owned = function ()
+	if _is_vote_client() then
+		return state.client_vote ~= nil and state.client_vote.chat_owned == true
+	end
+
+	return state.vote ~= nil and state.vote.chat_owned == true
+end
+
+-- Mirror VoxPopuli's tally into the vote so everything downstream can draw it.
+--
+-- Dense, one entry per card, for the same reason _broadcast_tally builds one:
+-- a sparse table arrives with holes and reads as fewer options than were
+-- offered. Rounded because chat votes are weighted and can be fractional --
+-- a subscriber is worth 2 -- and a card showing "3.5 votes" reads as a bug.
+net.set_chat_tally = function (counts)
+	local vote = state.vote
+
+	if not vote or not vote.chat_owned or type(counts) ~= "table" then
+		return false
+	end
+
+	local dense, changed = {}, false
+
+	for i = 1, #vote.cards do
+		dense[i] = math.floor((tonumber(counts[i]) or 0) + 0.5)
+
+		if dense[i] ~= (vote.chat_counts and vote.chat_counts[i]) then
+			changed = true
+		end
+	end
+
+	vote.chat_counts = dense
+
+	-- Only on change: this is called every frame while the end screen is up,
+	-- and the tally moves a handful of times in that window.
+	if changed then
+		_broadcast_tally()
+	end
+
+	return true
 end
 
 -- Forget the previous mission's vote.
@@ -684,6 +779,7 @@ local function _on_tally(sender_peer_id, payload)
 	end
 
 	client_vote.counts = payload.counts
+	client_vote.chat_owned = payload.chat_owned == true
 end
 
 -- ---------------------------------------------------------------------------

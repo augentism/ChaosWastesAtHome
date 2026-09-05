@@ -147,11 +147,31 @@ RunSelectView._cb_option_pressed = function (self, index)
 		-- the card can be changed as often as the player likes; the highlight
 		-- and the counts are refreshed from the shared tally each frame rather
 		-- than from this click.
+		-- The refusal is read, not discarded: with VoxPopuli connected the
+		-- viewers own this round and a player's click is not a ballot. Logging
+		-- "voted for X" regardless would make the log disagree with the tally,
+		-- which is exactly the thing anyone debugging this would trust.
+		--
+		-- Reading the second return value is safe against an older mod script:
+		-- mod.cast_vote has always forwarded net.cast_vote's (ok, reason) pair,
+		-- so this adds no new facade entry -- only a use of an existing one.
+		local cast, why = false, "no vote is open"
+
 		if mod.cast_vote then
-			pcall(mod.cast_vote, index)
+			local called
+			called, cast, why = pcall(mod.cast_vote, index)
+
+			if not called then
+				cast, why = false, "the vote could not be reached"
+			end
 		end
 
-		mod:info("voted for %s", tostring(option.mission_name))
+		if cast then
+			mod:info("voted for %s", tostring(option.mission_name))
+		else
+			mod:info("click on %s did not count: %s",
+				tostring(option.mission_name), tostring(why))
+		end
 
 		return
 	end

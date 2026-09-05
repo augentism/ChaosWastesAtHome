@@ -135,6 +135,22 @@ the cards, so you can see what the others are picking and change your mind.
 Whoever the vote lands on is where the run goes. What happens when it ties is a
 setting.
 
+**With VoxPopuli installed, the viewers pick the next mission.** If
+[VoxPopuli](../VoxPopuli) is present, switched on and connected to a chat, the
+end-of-round vote is handed to the stream: the same three cards appear with the
+same live tally, but the numbers on them are chat's and a player's click no
+longer counts. Viewers answer `!1`, `!2`, `!3` or the mission's internal name.
+
+This works **solo**, unlike the party vote — a lone streamer has a whole chat to
+vote against, which is the case it exists for. If chat says nothing before the
+end screen closes, the map is picked at random rather than falling back to the
+players, so the feature does not quietly stop working on a slow night.
+
+The vote is sized to whatever is left of the end screen, so *Extra seconds on
+the end screen* is what gives chat room to answer; with too little left, it is
+skipped and the party (or your click) decides as usual. Everything degrades to
+the normal vote if VoxPopuli is absent, older, off or disconnected.
+
 **Nobody is disconnected between missions.** The run moves the whole party
 straight from the scoreboard into the next mission with the session intact.
 Earlier versions restarted the host's session and had everyone reconnect; that

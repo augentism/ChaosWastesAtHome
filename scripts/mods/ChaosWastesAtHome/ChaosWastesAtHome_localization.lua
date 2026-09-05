@@ -702,6 +702,20 @@ return {
 	command_cw_votes = {
 		en = "show the current vote",
 	},
+	-- VoxPopuli compatibility: the viewers choose the next mission.
+	chat_vote_title = {
+		en = "Next mission",
+	},
+	chat_vote_opened = {
+		en = "Chaos Wastes: chat is choosing the next mission.",
+	},
+	chat_vote_holding = {
+		en = "Chaos Wastes: chat is still voting - the run continues when they are done.",
+	},
+	chat_vote_result = {
+		en = "Chaos Wastes: chat chose %s.",
+	},
+
 	vote_opened = {
 		en = "Chaos Wastes at Home: vote for the next mission with /cw_vote <number>",
 	},

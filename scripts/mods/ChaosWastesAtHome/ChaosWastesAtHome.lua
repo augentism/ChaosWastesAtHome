@@ -584,6 +584,20 @@ custom_buffs.register()
 -- which re-executes and would be a second registration.
 mod.custom_buff_id_map = custom_buffs.network_id_map
 
+-- Grants a named buff through the mission-buffs system, which is what makes it
+-- part of the run and therefore something run.capture will carry forward.
+--
+-- Parked for the same reason as the id map above, and with one more caller in
+-- mind: the in-game test suite needs to grant a known buff before a hop so
+-- carry-over can be asserted rather than assumed, and triggers.lua registers
+-- two hooks at file scope -- io_dofile'ing it from outside re-runs those and
+-- fills the player's chat with "Attempting to rehook active hook".
+mod.grant_named_buff = function (buff_name)
+	custom_buffs.ensure_network_id(buff_name)
+
+	return triggers.grant_named(buff_name)
+end
+
 -- Same reason: pause.lua asks this rather than loading net.lua itself.
 -- Any connection at all, ready or not. The pause has to respect a client that
 -- is still loading just as much as one that is playing -- more, in fact, since
@@ -817,6 +831,14 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 	mod._client_hold_told = nil
 
 	net.reset_vote()
+
+	-- And release any chat vote the last end screen left running. The token is
+	-- normally consumed when the winner is read, but the end screen can be
+	-- skipped entirely -- a crash, an alt-F4, a mid-run mod reload -- and a
+	-- leaked vote is worse than a lost one: VoxPopuli refuses to open a second
+	-- while one is live, so the *next* mission would silently get no chat vote
+	-- at all.
+	mod._release_chat_vote("a new mission started")
 
 	custom_buffs.register_network_lookup()
 	asset_loader.request()
@@ -1819,6 +1841,297 @@ end)
 --
 -- Art is left out on purpose: mission_name resolves it locally from
 -- MissionTemplates, so sending it would be bytes for nothing.
+-- ------------------------------------------------------------------------
+-- VoxPopuli: let the stream pick the next mission
+-- ------------------------------------------------------------------------
+--
+-- With VoxPopuli installed, connected and switched on, the next mission is
+-- chosen by the viewers instead of by the players. The cards, the tally on
+-- them, the client sync and /cw_votes are all unchanged -- only the electorate
+-- differs, because VoxPopuli's numbers are mirrored into the same vote the
+-- party would otherwise have filled in (net.set_chat_tally).
+--
+-- Two things this deliberately does NOT do:
+--
+--   * It does not require a party. CWaH only votes when somebody else is
+--     connected, because there is nobody to vote against solo -- but a solo
+--     streamer has a whole chat to vote against, which is the case this exists
+--     for. So a chat vote opens whether or not anyone else is in the session.
+--   * It does not fall back to the players when chat is silent. Zero votes
+--     picks at random, which is VoxPopuli's house rule for every other vote;
+--     falling back would mean the feature quietly stops working on a slow
+--     night, which is exactly when it would be hardest to notice.
+--
+-- Everything here degrades to "no chat vote" if VoxPopuli is absent, older, off
+-- or disconnected, and nothing below is reached in that case.
+
+-- How much of the end screen the vote is allowed to use.
+--
+-- Sized against the screen rather than fixed: the deadline belongs to
+-- StateGameScore and this has to close before it. The margin covers the frame
+-- the result is read on plus VoxPopuli's YouTube drain, which holds a vote open
+-- a few seconds past its visible countdown so late polled votes still land.
+local CHAT_VOTE_MARGIN = 8
+local CHAT_VOTE_MIN = 10
+local CHAT_VOTE_MAX = 60
+
+local function _voxpopuli()
+	local vox = get_mod and get_mod("VoxPopuli")
+
+	-- Checked by feature, not by version: an older VoxPopuli has no external
+	-- vote API at all, and this is the difference between "not supported" and
+	-- a nil call inside the end screen.
+	if not vox or type(vox.start_external_vote) ~= "function" then
+		return nil
+	end
+
+	return vox
+end
+
+-- Seconds of end screen left to spend, or nil if it cannot be worked out.
+--
+-- Measured the same way StateGameScore measures it, because that is what
+-- actually ends the screen: it fires game_score_done once
+-- `game_score_end_time() < Managers.backend:get_server_time(main_t)`
+-- (state_game_score.lua:88-93). Both sides of that comparison are **epoch
+-- milliseconds** -- get_server_time returns `server_time_game_start_epoch +
+-- t * 1000` -- so the difference is a duration in milliseconds and nothing
+-- here may substitute a raw frame timer for it.
+--
+-- The end time already includes this mod's own extension: the hook on
+-- game_score_end_time adds end_screen_extra_seconds before anyone reads it.
+local function _chat_vote_duration()
+	local progression = Managers.progression
+	local backend = Managers.backend
+
+	local function fallback()
+		-- No usable clock. The extension is the window the screen was
+		-- lengthened by, so spending it is the best guess available.
+		local extra = mod:get("end_screen_extra_seconds") or 0
+
+		if extra <= CHAT_VOTE_MIN + CHAT_VOTE_MARGIN then
+			return nil
+		end
+
+		return math.min(CHAT_VOTE_MAX, extra - CHAT_VOTE_MARGIN)
+	end
+
+	if not progression or not progression.game_score_end_time
+		or not backend or not backend.get_server_time then
+		return fallback()
+	end
+
+	local ok_end, end_time = pcall(progression.game_score_end_time, progression)
+
+	if not ok_end or type(end_time) ~= "number" then
+		return fallback()
+	end
+
+	local ok_now, now = pcall(backend.get_server_time, backend)
+
+	if not ok_now or type(now) ~= "number" then
+		return fallback()
+	end
+
+	local remaining = (end_time - now) / 1000
+
+	-- Too little left to be worth asking: a vote that closes after the screen
+	-- does is one nobody sees the result of.
+	if remaining <= CHAT_VOTE_MIN + CHAT_VOTE_MARGIN then
+		return nil
+	end
+
+	return math.min(CHAT_VOTE_MAX, remaining - CHAT_VOTE_MARGIN)
+end
+
+-- Opens the chat vote over cards that are already in net's hands.
+-- Returns true if the viewers now own this round.
+local function _start_chat_vote(cards)
+	local vox = _voxpopuli()
+
+	if not vox then
+		return false
+	end
+
+	local ok, why = vox.external_vote_available()
+
+	if not ok then
+		mod:debug_log("no chat vote for the next mission:", tostring(why))
+
+		return false
+	end
+
+	local duration = _chat_vote_duration()
+
+	if not duration then
+		mod:info("not putting the next mission to chat - too little of the end screen left")
+
+		return false
+	end
+
+	local options = {}
+
+	for i = 1, #cards do
+		options[i] = {
+			label = cards[i].label,
+			-- The mission name as a keyword so chat can type it instead of
+			-- counting rows. The display label is often two words with
+			-- punctuation, which is not something anyone types into chat.
+			keywords = { tostring(cards[i].mission_name) },
+		}
+	end
+
+	local token, err = vox.start_external_vote({
+		title = mod:localize("chat_vote_title"),
+		duration_secs = duration,
+		options = options,
+	})
+
+	if not token then
+		mod:info("could not put the next mission to chat (%s) - the party decides instead",
+			tostring(err))
+
+		return false
+	end
+
+	if not net.set_chat_owned() then
+		vox.cancel_external_vote(token)
+
+		return false
+	end
+
+	mod._chat_vote_token = token
+	mod._chat_hold_told = nil
+
+	mod:info("the next mission is chat's: %d option(s), %.0fs", #cards, duration)
+	mod:echo(mod:localize("chat_vote_opened"))
+
+	return true
+end
+
+-- Mirrors VoxPopuli's running tally into the vote, so the cards draw it and the
+-- existing broadcast ships it to clients. Called every frame while the end
+-- screen is up; net.set_chat_tally only broadcasts when a number actually
+-- moved.
+local function _update_chat_vote(dt)
+	local token = mod._chat_vote_token
+
+	if not token then
+		return
+	end
+
+	local vox = _voxpopuli()
+
+	if not vox then
+		mod._chat_vote_token = nil
+
+		return
+	end
+
+	local status = vox.external_vote_status(token)
+
+	if not status then
+		-- VoxPopuli dropped it -- a mod reload, or it was cancelled from
+		-- elsewhere. The round reverts to whatever the party has, which solo is
+		-- the pre-selected first option.
+		mod._chat_vote_token = nil
+
+		return
+	end
+
+	net.set_chat_tally(status.counts)
+end
+
+-- Is a chat vote still collecting answers?
+--
+-- The end screen has two exits and only one of them is a deadline. Pressing
+-- Continue (Space) calls multiplayer_session:leave("skip_end_of_round"), which
+-- lands in the hook below and resolves the vote *immediately* -- taking
+-- whoever happens to be ahead, or picking at random if nobody has answered yet.
+--
+-- Space is also the button players hammer to get through the scoreboard, so
+-- without this the common case is a vote that opens and is thrown away within
+-- the second, looking for all the world like the feature does not work.
+--
+-- Holding is safe rather than a way to trap someone on the scoreboard: the vote
+-- is sized to close before the screen's own deadline (see _chat_vote_duration),
+-- this goes false the moment it finishes, and if the screen times out anyway
+-- game_score_done resolves the run through the other exit.
+local function _chat_vote_holding()
+	local token = mod._chat_vote_token
+
+	if not token then
+		return false
+	end
+
+	local vox = _voxpopuli()
+
+	if not vox or type(vox.external_vote_status) ~= "function" then
+		return false
+	end
+
+	local status = vox.external_vote_status(token)
+
+	-- Gone (a reload, a cancel) or already decided: nothing left to wait for.
+	if not status or status.finished then
+		return false
+	end
+
+	return true
+end
+
+-- Drops a chat vote without reading it. Safe to call at any time, including
+-- when there is nothing to drop.
+function mod._release_chat_vote(why)
+	local token = mod._chat_vote_token
+
+	if not token then
+		return
+	end
+
+	mod._chat_vote_token = nil
+
+	local vox = _voxpopuli()
+
+	if vox and vox.cancel_external_vote(token) then
+		mod:debug_log("released the chat vote:", tostring(why))
+	end
+end
+
+-- The viewers' answer, or nil if they were never asked.
+--
+-- Consumes the token, so the two end-screen exits cannot both resolve it -- the
+-- same reason _resolve_end_screen_vote consumes mod._vote_options.
+local function _chat_vote_winner()
+	local token = mod._chat_vote_token
+
+	if not token then
+		return nil
+	end
+
+	mod._chat_vote_token = nil
+
+	local vox = _voxpopuli()
+
+	if not vox then
+		return nil
+	end
+
+	-- finish_external_vote always answers: the winner if the vote ran its
+	-- course, whoever was ahead if the screen was dismissed early, and a random
+	-- option if nobody voted at all. That last rule lives in VoxPopuli rather
+	-- than here so it matches every other vote it runs.
+	local index, note = vox.finish_external_vote(token)
+
+	if not index then
+		mod:info("chat vote produced nothing (%s)", tostring(note))
+
+		return nil
+	end
+
+	return index, note
+end
+
 local function _vote_cards(options)
 	local cards = {}
 
@@ -1907,25 +2220,48 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 	-- matters whether the player clicks, clicks late, or never clicks at all.
 	run.state().next_mission = options[1]
 
-	-- A vote only when there is somebody to vote against. Solo, the picker
+	-- A vote when there is somebody to vote against -- other players, or, with
+	-- VoxPopuli connected, a chat full of them. Solo with no stream the picker
 	-- stays exactly what it has always been and a click is a decision, not a
 	-- ballot.
+	--
+	-- The vote is opened first and handed to chat second, because
+	-- net.set_chat_owned works on the round net.start_vote has already created:
+	-- the cards, the token and the client sync are the same either way and only
+	-- the electorate changes.
 	local party = net.connected_count() > 0
+	local chat = false
 
-	mod._vote_options = party and options or nil
+	mod._chat_vote_token = nil
 
-	if party then
-		local cards = _vote_cards(options)
+	local cards = _vote_cards(options)
+	local vote_open = false
 
-		if not net.start_vote(cards) then
+	if party or _voxpopuli() then
+		vote_open = net.start_vote(cards)
+
+		if not vote_open and party then
 			mod:error("could not put the next mission to a vote - falling back to the host choosing")
-
-			mod._vote_options = nil
-			party = false
 		end
 	end
 
-	mod:debug_log("end screen offering", #options, "mission(s);", party and "party vote" or "solo pick")
+	if vote_open then
+		chat = _start_chat_vote(cards)
+
+		-- Nobody to vote and nobody watching: the round was opened only on the
+		-- chance chat would take it, so close it again rather than leave a vote
+		-- open that exactly one person can answer.
+		if not chat and not party then
+			net.reset_vote()
+
+			vote_open = false
+		end
+	end
+
+	mod._vote_options = vote_open and options or nil
+
+	mod:debug_log("end screen offering", #options, "mission(s);",
+		chat and "chat vote" or vote_open and "party vote" or "solo pick")
 
 	Managers.ui:open_view(RUN_SELECT_VIEW, nil, nil, nil, nil, {
 		options = options,
@@ -2000,6 +2336,29 @@ local function _resolve_end_screen_vote()
 	end
 
 	mod._vote_options = nil
+
+	-- Chat first, and exclusively: when the viewers own the round the players'
+	-- ballots were never recorded (net.lua's _record_vote refuses them), so
+	-- net.vote_result would have nothing to report but its own zero-vote
+	-- fallback of "option 1".
+	local chat_index, chat_note = _chat_vote_winner()
+
+	if chat_index then
+		local chosen = options[chat_index]
+
+		if chosen then
+			run.state().next_mission = chosen
+
+			mod:info("chat chose option %d (%s) - %s",
+				chat_index, tostring(chosen.mission_name), tostring(chat_note))
+			mod:echo(mod:localize("chat_vote_result",
+				chain.mission_display_name(chosen.mission_name)))
+
+			return
+		end
+
+		mod:error("chat picked option %d but only %d were offered", chat_index, #options)
+	end
 
 	local index, cast, note = net.vote_result()
 	local option = index and options[index]
@@ -2178,6 +2537,19 @@ mod:hook(MultiplayerSessionManager, "leave", function (func, self, reason)
 	-- party a frame or two into the transition we just started.
 	if reason == "skip_end_of_round" then
 		if continue_in_flight > 0 then
+			return
+		end
+
+		-- Chat is still answering. Swallowed like the guest hold below, and for
+		-- the same reason: this is the exit players hammer, and letting it
+		-- through would throw the vote away seconds after it opened.
+		if _chat_vote_holding() then
+			if not mod._chat_hold_told then
+				mod._chat_hold_told = true
+
+				mod:echo(mod:localize("chat_vote_holding"))
+			end
+
 			return
 		end
 
@@ -2421,6 +2793,7 @@ mod.update = function (dt)
 	choice_shield.update(dt)
 	custom_buffs.update(dt)
 	_update_client_end_screen_picker(dt)
+	_update_chat_vote(dt)
 
 	if continue_in_flight > 0 then
 		continue_in_flight = continue_in_flight - (dt or 0)
