@@ -14,229 +14,284 @@ return {
 	menu_keybind = {
 		en = "Open the Chaos Wastes menu",
 		ru = "Открыть меню Пустошей Хаоса",
+		["zh-cn"] = "打开混沌荒原菜单",
 	},
 	menu_keybind_description = {
 		en = "One key for every screen. In the Mourningstar it opens the run launcher, with a tab across to the rollable-buff settings. In a mission it shows the buffs collected so far and pauses the game while it is open. Pressing it again closes whatever is open.",
 		ru = "Одна клавиша для всех экранов. На Моунингстаре открывает запуск забега, с вкладкой настроек случайных усилений. В миссии показывает собранные усиления и ставит игру на паузу, пока меню открыто. Повторное нажатие закрывает текущее окно.",
+		["zh-cn"] = "单按键接管全部界面。哀星号上开启流程启动器，附带随机增益设置标签；任务内打开已收集增益列表并暂停游戏，再次按下关闭窗口。",
 	},
 	open_menu = {
 		en = "Open the menu",
 		ru = "Открыть меню",
+		["zh-cn"] = "打开菜单",
 	},
 	open_menu_description = {
 		en = "The same thing the keybind does, for anyone who has not bound a key.",
 		ru = "То же, что и клавиша, для тех, кто не назначил клавишу.",
+		["zh-cn"] = "功能等同于快捷键，供未绑定按键的玩家使用。",
 	},
 	menu_open_now = {
 		en = "Open it now",
 		ru = "Открыть сейчас",
+		["zh-cn"] = "立即打开",
 	},
 	tab_start_run = {
 		en = "Start a Crusade",
 		ru = "Начать поход",
+		["zh-cn"] = "开启远征",
 	},
 	tab_rollable_buffs = {
 		en = "Rollable Buffs",
 		ru = "Случайные усиления",
+		["zh-cn"] = "随机增益",
 	},
 	tab_collected = {
 		en = "Buffs Collected",
 		ru = "Собранные усиления",
+		["zh-cn"] = "已获取增益",
 	},
 	command_cw_menu = {
 		en = "open the Chaos Wastes menu for where you are",
 		ru = "открыть меню Пустошей Хаоса для текущего местоположения",
+		["zh-cn"] = "指令：打开对应场景的混沌荒原菜单",
 	},
 
 	-- Run launcher ----------------------------------------------------------
 	open_launch_view = {
 		en = "Start a run",
 		ru = "Начать забег",
+		["zh-cn"] = "开启流程",
 	},
 	open_launch_view_description = {
 		en = "Opens the run launcher from the Mourningstar: pick a starting difficulty and one of three missions. A run only begins from here, so ordinary missions are left alone.",
 		ru = "Открывает запуск забега с Моунингстара: выберите начальную сложность и одну из трёх миссий. Забег начинается только отсюда, обычные миссии не затрагиваются.",
+		["zh-cn"] = "在哀星号开启流程启动器，选择起始难度与三选一任务。仅由此处启动荒原流程，普通任务不受影响。",
 	},
 	launch_open_now = {
 		en = "Open the launcher",
 		ru = "Открыть запуск",
+		["zh-cn"] = "打开启动器",
 	},
 	launch_view_title = {
 		en = "Begin a Crusade",
 		ru = "Начать поход",
+		["zh-cn"] = "开启远征",
 	},
 	launch_subtitle = {
 		en = "Choose a starting difficulty and a mission.",
 		ru = "Выберите начальную сложность и миссию.",
+		["zh-cn"] = "选择起始难度与任务。",
 	},
 	launch_selected = {
 		en = "Next: %s",
 		ru = "Далее: %s",
+		["zh-cn"] = "下一局：%s",
 	},
 	launch_no_missions = {
 		en = "No eligible missions found.",
 		ru = "Подходящих миссий не найдено.",
+		["zh-cn"] = "未找到可用任务。",
 	},
 	launch_difficulty = {
 		en = "Difficulty",
 		ru = "Сложность",
+		["zh-cn"] = "难度",
 	},
 	launch_reroll = {
 		en = "Reroll missions",
 		ru = "Заменить миссии",
+		["zh-cn"] = "刷新任务列表",
 	},
 	launch_begin = {
 		en = "Begin the run",
 		ru = "Начать забег",
+		["zh-cn"] = "开始流程",
 	},
 	launch_begin_replace = {
 		en = "End run & begin",
 		ru = "Завершить забег и начать",
+		["zh-cn"] = "终止旧流程并开启新流程",
 	},
 	launch_hub_only = {
 		en = "Chaos Wastes at Home: a run can only be started from the Mourningstar or from one of this mod's own missions.",
 		ru = "Пустоши Хаоса у нас дома: забег можно начать только с Моунингстар.",
+		["zh-cn"] = "单人混沌荒原：仅可在哀星号或是模组生成的任务内开启流程。",
 	},
 	command_cw_launch = {
 		en = "open the run launcher",
 		ru = "открыть запуск забега",
+		["zh-cn"] = "指令：打开流程启动器",
 	},
 
 	-- Buff toggle menu ------------------------------------------------------
 	open_buff_toggle_view = {
 		en = "Rollable buffs",
 		ru = "Случайные усиления",
+		["zh-cn"] = "随机增益",
 	},
 	open_buff_toggle_view_description = {
 		en = "Opens a menu listing every buff that can be rolled, grouped by family and class. Everything is enabled by default; anything you switch off stops appearing in buff choices.",
 		ru = "Открывает меню со всеми доступными усилениями, сгруппированными по семействам и классам. По умолчанию всё включено; отключённые усиления перестанут появляться в выборе.",
+		["zh-cn"] = "打开增益列表，按派系、职业分组展示全部可刷出增益。默认全部启用，关闭后的增益将不再出现在选卡池。",
 	},
 	buff_toggle_open_none = {
 		en = "...",
 		ru = "...",
+		["zh-cn"] = "...",
 	},
 	buff_toggle_open_now = {
 		en = "Open the menu",
 		ru = "Открыть меню",
+		["zh-cn"] = "打开菜单",
 	},
 	buff_toggle_view_title = {
 		en = "Rollable Buffs",
 		ru = "Случайные усиления",
+		["zh-cn"] = "随机增益",
 	},
 	buff_group_legendary = {
 		en = "Legendary",
 		ru = "Легендарные",
+		["zh-cn"] = "传说",
 	},
 	buff_group_custom = {
 		en = "Custom",
 		ru = "Пользовательские",
+		["zh-cn"] = "自定义",
 	},
 	buff_group_archetype = {
 		en = "Class: %s",
 		ru = "Класс: %s",
+		["zh-cn"] = "职业：%s",
 	},
 	buff_state_on = {
 		en = "ON",
 		ru = "ВКЛ",
+		["zh-cn"] = "开启",
 	},
 	buff_state_off = {
 		en = "OFF",
 		ru = "ВЫКЛ",
+		["zh-cn"] = "关闭",
 	},
 	buff_enable_all = {
 		en = "Enable all shown",
 		ru = "Включить все показанные",
+		["zh-cn"] = "启用全部显示项",
 	},
 	buff_disable_all = {
 		en = "Disable all shown",
 		ru = "Отключить все показанные",
+		["zh-cn"] = "禁用全部显示项",
 	},
 	-- Named for what the button DOES, not for the state it is in. The state
 	-- reads off the row itself -- an excluded family is dimmed in the list --
 	-- and a button labelled with a state gives no clue that it can be clicked.
 	family_pick_disable = {
 		en = "Disable starting pick",
+		["zh-cn"] = "禁用开局派系选择",
 	},
 	family_pick_enable = {
 		en = "Enable starting pick",
+		["zh-cn"] = "启用开局派系选择",
 	},
 	family_pick_unavailable = {
 		en = "Select a family",
+		["zh-cn"] = "选择一个增益派系",
 	},
 	buff_reset_all = {
 		en = "Re-enable everything",
 		ru = "Включить всё заново",
+		["zh-cn"] = "全部重新启用",
 	},
 	buff_kind_family = {
 		en = "Family buff",
 		ru = "Усиление из одного семейства",
+		["zh-cn"] = "派系增益",
 	},
 	buff_kind_legendary = {
 		en = "Legendary buff",
 		ru = "Легендарное усиление",
+		["zh-cn"] = "传说增益",
 	},
 	buff_no_description = {
 		en = "No description available for this buff.",
 		ru = "Для этого усиления нет описания.",
+		["zh-cn"] = "该增益暂无描述。",
 	},
 	buff_enable_this = {
 		en = "Enable this buff",
 		ru = "Включить это усиление",
+		["zh-cn"] = "启用该增益",
 	},
 	buff_disable_this = {
 		en = "Disable this buff",
 		ru = "Отключить это усиление",
+		["zh-cn"] = "禁用该增益",
 	},
 	buff_summary_all_on = {
 		en = "All buffs enabled.",
 		ru = "Все усиления включены.",
+		["zh-cn"] = "全部增益已启用。",
 	},
 	buff_summary_disabled = {
 		en = "%s buff(s) disabled and excluded from every roll.",
 		ru = "%s усиление(й) отключено и исключено из всех выборов.",
+		["zh-cn"] = "%s个增益已禁用，不再参与抽取。",
 	},
 	command_cw_buffs = {
 		en = "open the rollable-buffs menu",
 		ru = "открыть меню случайных усилений",
+		["zh-cn"] = "指令：打开随机增益菜单",
 	},
 
 	-- Collected buffs screen ------------------------------------------------
 	buffs_view_keybind = {
 		en = "Show collected buffs",
 		ru = "Показать собранные усиления",
+		["zh-cn"] = "查看已获取增益",
 	},
 	buffs_view_keybind_description = {
 		en = "Opens a screen listing every buff the run has collected so far. Gameplay is paused for as long as it is open, and the same key closes it.",
 		ru = "Открывает экран со всеми усилениями, собранными за текущий забег. Игра ставится на паузу, пока экран открыт; повторное нажатие закрывает его.",
+		["zh-cn"] = "打开当前流程全部已获得增益列表，打开时暂停对局，再次按下快捷键关闭界面。",
 	},
 	buffs_view_title = {
 		en = "Buffs Collected",
 		ru = "Собранные усиления",
+		["zh-cn"] = "已获取增益",
 	},
 	buffs_view_summary = {
 		en = "%s buffs, %s stacks - family: %s",
 		ru = "%s усилений, %s слоёв - семейство: %s",
+		["zh-cn"] = "增益数量：%s，层数：%s，派系：%s",
 	},
 	buffs_view_empty = {
 		en = "Nothing collected yet.",
 		ru = "Пока ничего не собрано.",
+		["zh-cn"] = "尚未获取任何增益。",
 	},
 	buffs_view_not_in_run = {
 		en = "Chaos Wastes at Home: not in a run - nothing to show.",
 		ru = "Пустоши Хаоса у нас дома: вы не в забеге - нечего показывать.",
+		["zh-cn"] = "单人混沌荒原：未处于荒原流程，无内容可展示。",
 	},
 	command_cw_buffs_held = {
 		en = "show the buffs collected this run",
 		ru = "показать усиления, собранные в этом забеге",
+		["zh-cn"] = "指令：查看本次流程已获取增益",
 	},
 
 	use_bots = {
 		en = "Bring bots",
 		ru = "Взять ботов",
+		["zh-cn"] = "携带AI队友",
 	},
 	use_bots_description = {
 		en = "Off by default: a run is solo, with no team. Turn this on to fill the squad with the game's bots. Tertium4Or5 is the recommended companion mod for this - it lets you pick which of your own characters take the bot slots, and can raise the team size. Leaving this off suppresses bots entirely, which the game would otherwise spawn on its own.",
 		ru = "По умолчанию выключено: забег полностью одиночный, без команды. Включите, чтобы заполнить отряд ботами игры. Рекомендуется использовать мод Tertium4Or5 - он позволяет выбрать, какие ваши персонажи займут слоты ботов, и может увеличить размер команды. Если оставить выключенным, боты не появятся совсем (в обычной игре они бы появились).",
+		["zh-cn"] = "默认关闭：流程为纯单人无队友。开启后将由游戏AI填充小队。推荐搭配Tertium4Or5模组，可以指定自己的角色充当AI位并扩大队伍规模。关闭则完全屏蔽游戏原生AI生成。",
 	},
 
 	difficulty_ramp = {
@@ -257,6 +312,7 @@ return {
 	preload_horde_assets_description = {
 		en = "Loads the Mortis mission package so buff icons and buff particle effects render properly. Without it the cards show placeholders and buff effects are skipped. Measured at about half a second on a warm cache, up to three seconds on the first load after launching the game. Paid once per run rather than per mission, and it streams in alongside the mission's own assets rather than holding up the load.",
 		ru = "Загружает пакет миссий Мортис, чтобы иконки и визуальные эффекты усилений отображались корректно. Без этой загрузки карты показывают заглушки, а эффекты пропускаются. Занимает около половины секунды на готовом кэше или до 3 секунд при первом запуске после старта игры. Загружается один раз за забег, а не за миссию, и подгружается параллельно с ресурсами миссии, не задерживая загрузку.",
+		["zh-cn"] = "加载死灵试炼资源包，保证增益图标与粒子特效正常显示。不开启会显示占位符，特效丢失。缓存就绪约0.5秒，游戏刚启动首次加载最多3秒。整个流程仅加载一次，与任务资源并行加载，不会拖慢读条。",
 	},
 	end_screen_extra_seconds = {
 		en = "Extra seconds on the end screen",
@@ -271,22 +327,28 @@ return {
 	custom_buff_weight = {
 		en = "Custom buff frequency",
 		ru = "Частота пользовательских усилений",
+		["zh-cn"] = "自定义增益权重",
 	},
 	custom_buff_weight_description = {
 		en = "How often buffs added by custom_buffs.lua come up in a legendary card pick, relative to the shipped categories (which sit around 1-5). 0 removes them entirely without deleting them.",
 		ru = "Как часто усиления из custom_buffs.lua появляются в легендарных картах, относительно стандартных категорий (у них вес около 1–5). 0 полностью исключает их, не удаляя сами усиления.",
+		["zh-cn"] = "控制 custom_buffs.lua 自定义增益在传说卡池的出现概率，原版类别权重1-5。填0会屏蔽自定义增益但不会删除配置。",
 	},
 	starting_legendary_picks = {
 		en = "Starting card picks",
+		["zh-cn"] = "开局传说卡牌抽取次数",
 	},
 	starting_legendary_picks_description = {
 		en = "Card picks handed out right after you choose your buff family, before the run's own triggers start. They come first, then the starting family buffs. These are extra: they do not count against the run's card pick limit, so the triggers still hand out their full allowance afterwards.",
+		["zh-cn"] = "选定增益派系后、流程触发机制启动前给予的抽卡次数。优先执行抽卡，再发放开局派系增益。属于额外奖励，不计入本局抽卡上限，后续触发仍可拿满额度。",
 	},
 	starting_family_buffs = {
 		en = "Starting family buffs",
+		["zh-cn"] = "开局派系增益数量",
 	},
 	starting_family_buffs_description = {
 		en = "Family buffs granted right after the starting card picks. Extra, like the card picks: they do not count against the run's family buff limit.",
+		["zh-cn"] = "完成开局抽卡后发放的派系增益。属于额外奖励，不计入本局派系增益上限。",
 	},
 	havoc_theme_chance = {
 		en = "Environment chance",
@@ -317,9 +379,11 @@ return {
 	},
 	protect_while_choosing = {
 		en = "Protect players while choosing",
+		["zh-cn"] = "选卡期间保护玩家",
 	},
 	protect_while_choosing_description = {
 		en = "While a buff card is on screen, that player cannot be hurt and enemies will not target them. Each player is protected only while their own card is up. This exists because pausing cannot work with other players connected - stopping the clock disconnects them - so without it, reading three cards means standing still in a fight. Safe to leave on alongside pausing; it simply has nothing to do when the game is already stopped.",
+		["zh-cn"] = "弹出增益选卡界面时，该玩家免疫伤害，敌人不会锁定目标。仅自身选卡时生效。多人联机无法暂停，开启该功能避免选卡时暴毙；与暂停选项可同时开启，游戏已暂停时该保护不会额外生效。",
 	},
 	pause_on_choice = {
 		en = "Pause while choosing",
@@ -329,6 +393,7 @@ return {
 	pause_on_choice_description = {
 		en = "Freeze gameplay while a buff choice is on screen, so reading the cards cannot get you killed. The card's countdown is held for as long as the pause lasts, so nothing is auto-picked out from under you - take as long as you like. Turn this off to play with the stock 30 second timer instead.",
 		ru = "Замораживает игру, когда на экране выбор усилений, чтобы чтение карт не угрожало вашей жизни. Обратный отсчёт карты приостановлен, пока длится пауза, так что вы не потеряете выбор из-за таймера - берите столько времени, сколько нужно. Отключите, чтобы играть с обычным 30-секундным таймером.",
+		["zh-cn"] = "弹出增益选卡时冻结对局，不会被怪物击杀。选卡倒计时同步暂停，不会自动帮你选卡。关闭则使用原版30秒倒计时。",
 	},
 	max_legendary_choices = {
 		en = "Legendary card picks",
@@ -659,88 +724,129 @@ return {
 	command_cw_give = {
 		en = "grant one buff by name - /cw_give [name or search text]",
 		ru = "выдать одно усиление по имени - /cw_give [имя или текст поиска]",
+		["zh-cn"] = "指令：按名称获取增益 - /cw_give [名称或搜索关键词]",
 	},
 	pause_disabled_multiplayer = {
 		en = "Chaos Wastes at Home: pausing is disabled while other players are connected -- stopping the clock disconnects them.",
+		["zh-cn"] = "单人混沌荒原：存在其他玩家连接时禁用暂停，暂停会导致队友断开连接。",
 	},
 	waiting_for_host = {
 		en = "Chaos Wastes at Home: waiting for the host to start the next mission - you will be taken there automatically.",
+		["zh-cn"] = "单人混沌荒原：等待房主开启下一局任务，将自动跳转。",
 	},
 	picker_card_votes = {
 		en = "%s vote(s)  -  %s",
+		["zh-cn"] = "%s票  —  %s",
 	},
 	picker_vote_subtitle = {
 		en = "Vote for where the run goes next - %s vote(s) so far",
+		["zh-cn"] = "投票选择下一局任务，当前票数：%s",
 	},
 	picker_vote_yours = {
 		en = "You voted for %s - %s vote(s) so far",
+		["zh-cn"] = "你已投票给 %s，当前票数：%s",
 	},
 	picker_voted = {
 		en = "The party voted for %s.",
+		["zh-cn"] = "队伍投票选定 %s。",
 	},
 	settings_section_vote = {
 		en = "Voting on the next mission",
+		["zh-cn"] = "下一局任务投票设置",
 	},
 	vote_tiebreak = {
 		en = "When a vote ties",
+		["zh-cn"] = "投票出现平票时",
 	},
 	vote_tiebreak_description = {
 		en = "Which mission wins when two or more finish level. With only two players every disagreement is a tie, so this decides more often than it sounds like it would. Whichever is chosen, a tie between missions nobody voted for falls to the leftmost card.",
+		["zh-cn"] = "多选项票数相同时如何判定。双人对局分歧极易产生平票，该选项生效频率很高；无任何人投票的选项平票，将直接选择最左侧卡片。",
 	},
 	vote_tiebreak_host = {
 		en = "The host decides",
+		["zh-cn"] = "由房主决定",
 	},
 	vote_tiebreak_first = {
 		en = "Whoever got there first",
+		["zh-cn"] = "优先选择最先出现的选项",
 	},
 	vote_tiebreak_random = {
 		en = "Pick at random",
+		["zh-cn"] = "随机抽取",
 	},
 	command_cw_vote = {
 		en = "vote for the next mission - /cw_vote [1|2|3]",
+		["zh-cn"] = "指令：为下一局投票 - /cw_vote [1|2|3]",
 	},
 	command_cw_votes = {
 		en = "show the current vote",
+		["zh-cn"] = "指令：查看当前投票情况",
 	},
 	-- VoxPopuli compatibility: the viewers choose the next mission.
 	chat_vote_title = {
 		en = "Next mission",
+		["zh-cn"] = "下一个任务",
 	},
 	chat_vote_opened = {
 		en = "Chaos Wastes: chat is choosing the next mission.",
+		["zh-cn"] = "单人混沌荒原：观众正在投票选择下一个任务。",
+	},
+	-- While the viewers are still voting. %s = the mission in the lead, %d = votes cast.
+	picker_vote_chat_leading = {
+		en = "Chat is leaning towards %s (%d vote(s))",
+		["zh-cn"] = "观众目前倾向于%s（%d票）",
+	},
+	picker_vote_chat_waiting = {
+		en = "Waiting for chat to vote",
+		["zh-cn"] = "等待观众投票",
+	},
+	-- Shown under the cards once the viewers have settled it. %s = the mission.
+	picker_vote_chat_won = {
+		en = "Chat chose %s",
+		["zh-cn"] = "观众选择了%s",
 	},
 	chat_vote_holding = {
 		en = "Chaos Wastes: chat is still voting - the run continues when they are done.",
+		["zh-cn"] = "单人混沌荒原：观众仍在投票，投票结束后继续本次流程。",
 	},
 	chat_vote_result = {
 		en = "Chaos Wastes: chat chose %s.",
+		["zh-cn"] = "单人混沌荒原：观众选择了%s。",
 	},
 
 	vote_opened = {
 		en = "Chaos Wastes at Home: vote for the next mission with /cw_vote <number>",
+		["zh-cn"] = "单人混沌荒原：使用 /cw_vote <数字> 为下一局任务投票",
 	},
 	command_cw_carry = {
 		en = "show what the run is carrying over, and for whom",
+		["zh-cn"] = "指令：查看流程携带的增益与归属玩家",
 	},
 	command_cw_peers = {
 		en = "show connected peers and whether their custom buff ids match",
+		["zh-cn"] = "指令：查看联机玩家，校验自定义增益ID一致性",
 	},
 	net_peer_mismatch = {
 		en = "Chaos Wastes at Home: a connected player (%s) is running a different version or different buff ids. Custom buffs are suppressed until it matches - see /cw_peers.",
+		["zh-cn"] = "单人混沌荒原：联机玩家(%s)模组版本或自定义增益ID不一致。自定义增益已临时屏蔽，可执行 /cw_peers 查看详情。",
 	},
 	command_cw_arm = {
 		en = "arm a run without launching - for taking over a mission started some other way",
+		["zh-cn"] = "指令：预激活荒原流程，接管外部方式开启的对局",
 	},
 	arm_done = {
 		en = "Chaos Wastes at Home: run armed. The next mission you start by any means will be taken over as if the launcher had started it. You do not need this to start a normal run - use Begin Run.",
+		["zh-cn"] = "单人混沌荒原：流程已预激活。下一个开启的任务将被接管，如同通过模组启动器开启。正常流程无需使用该指令，请直接使用「开始流程」。",
 	},
 	command_cw_modifiers = {
 		en = "list the modifiers and environment this mission actually loaded",
 		ru = "показать модификаторы и окружение, которые действительно загружены в этой миссии",
+		["zh-cn"] = "指令：查看当前任务实际加载的词条与环境效果",
 	},
 	command_cw_verify = {
 		en = "check whether the custom buffs are attached and having an effect",
 		ru = "проверить, подключены ли пользовательские усиления и работают ли они",
+		["zh-cn"] = "指令：校验自定义增益是否正常挂载生效",
 	},
 	conflict_auto_restart = {
 		en = "Chaos Wastes at Home: TrueSoloQoL's auto-restart is on, so losing will restart the mission instead of ending your run. Turn it off for runs to be loseable.",
@@ -769,120 +875,159 @@ return {
 	-- write a literal per-cent as %%%%.
 	ignore_buff_family = {
 		en = "Ignore buff families",
+		["zh-cn"] = "忽略增益派系限制",
 	},
 	ignore_buff_family_description = {
 		en = "You still choose a family and still get its opening buff, but the small buffs you earn afterwards are drawn from every family instead of only the one you picked - about seventy of them rather than ten. Buffs switched off in Rollable Buffs stay off.",
+		["zh-cn"] = "你依旧可以选择一个派系并获得该派系的初始增益，但后续获取的小型增益将从全部派系中抽取，而非仅来自你所选派系——可选增益从10种扩充至约70种。在可刷新增益列表中关闭的增益依旧不会出现。",
 	},
 	-- Loadouts ---------------------------------------------------------------
 	tab_loadouts = {
 		en = "Loadouts",
+		["zh-cn"] = "配置方案",
 	},
 	tab_settings = {
 		en = "Settings",
+		["zh-cn"] = "设置",
 	},
 	settings_section_run = {
 		en = "The run",
+		["zh-cn"] = "本局远征",
 	},
 	settings_section_buffs = {
 		en = "Buffs",
+		["zh-cn"] = "增益效果",
 	},
 	settings_section_havoc = {
 		en = "Havoc",
+		["zh-cn"] = "浩劫",
 	},
 	settings_section_sources = {
 		en = "How buffs are earned",
+		["zh-cn"] = "增益获取方式",
 	},
 	settings_title = {
 		en = "Settings",
+		["zh-cn"] = "设置",
 	},
 	settings_on = {
 		en = "On",
+		["zh-cn"] = "开启",
 	},
 	settings_off = {
 		en = "Off",
+		["zh-cn"] = "关闭",
 	},
 	loadout_change_icon = {
 		en = "Change icon",
+		["zh-cn"] = "更换图标",
 	},
 	loadout_title = {
 		en = "Loadouts",
+		["zh-cn"] = "配置方案",
 	},
 	loadout_subtitle = {
 		en = "Click a loadout to load it. Anything you change afterwards is saved to it automatically.",
+		["zh-cn"] = "点击配置方案即可加载。之后的所有改动都会自动保存至该方案。",
 	},
 	loadout_empty = {
 		en = "No loadouts yet. Create one to save your current settings.",
+		["zh-cn"] = "暂无配置方案。创建一个来保存你当前的设置。",
 	},
 	loadout_unavailable = {
 		en = "Loadouts are unavailable: this session has no file access.",
+		["zh-cn"] = "配置方案不可用：当前会话无法访问文件。",
 	},
 	loadout_create = {
 		en = "New loadout",
+		["zh-cn"] = "新建配置方案",
 	},
 	loadout_set_default = {
 		en = "Make default",
+		["zh-cn"] = "设为默认",
 	},
 	loadout_is_default = {
 		en = "default",
+		["zh-cn"] = "默认",
 	},
 	loadout_delete = {
 		en = "Delete",
+		["zh-cn"] = "删除",
 	},
 	loadout_delete_confirm = {
 		en = "Sure?",
+		["zh-cn"] = "确定删除？",
 	},
 	loc_cwah_custom_damage_title = {
 		en = "Wrath Unbound",
+		["zh-cn"] = "无拘之怒",
 	},
 	loc_cwah_custom_damage_description = {
 		en = "Increases all damage you deal by %s.",
+		["zh-cn"] = "你的所有伤害提高%s。",
 	},
 	loc_cwah_custom_toughness_on_elite_kill_title = {
 		en = "Bulwark",
+		["zh-cn"] = "壁垒",
 	},
 	loc_cwah_custom_toughness_on_elite_kill_description = {
 		en = "Killing an elite restores %s toughness.",
+		["zh-cn"] = "击杀一名精英敌人恢复%s韧性。",
 	},
 	loc_cwah_crit_ramp_title = {
 		en = "Building Fury",
+		["zh-cn"] = "怒火积蓄",
 	},
 	loc_cwah_crit_ramp_description = {
 		en = "Every hit that does not critically strike raises your critical chance by %s. Resets when you critically strike.",
+		["zh-cn"] = "每一次非暴击命中都会提升%s暴击几率。触发暴击后重置。",
 	},
 	loc_cwah_attack_speed_ramp_title = {
 		en = "Relentless",
+		["zh-cn"] = "永不停歇",
 	},
 	loc_cwah_attack_speed_ramp_description = {
 		en = "Every hit raises your attack speed by %s, up to %s. Resets after %s seconds without attacking.",
+		["zh-cn"] = "每次命中提升%s攻击速度，最高%s。停止攻击%s秒后重置。",
 	},
 	loc_cwah_status_cascade_title = {
 		en = "Contagion",
+		["zh-cn"] = "疫病蔓延",
 	},
 	loc_cwah_status_cascade_description = {
 		en = "Whenever you afflict an enemy with a status effect, they suffer a second one at random - soulblaze, fire, electrocution, bleed, chem toxin or brittleness.",
+		["zh-cn"] = "每当你给敌人施加一种异常状态，会随机附加另一种异常：魂火、灼烧、电击、流血、化学毒素或脆化。",
 	},
 	loc_cwah_flayer_title = {
 		en = "Flayer",
+		["zh-cn"] = "碎颅者",
 	},
 	loc_cwah_flayer_description = {
 		en = "Every hit has a %s chance to burst the target's skull.",
+		["zh-cn"] = "每次命中有%s概率击碎目标头颅。",
 	},
 	loc_cwah_proliferation_title = {
 		en = "Proliferation",
+		["zh-cn"] = "扩散侵染",
 	},
 	loc_cwah_proliferation_description = {
 		en = "When an enemy you have afflicted dies, every status effect on it spreads to nearby enemies.",
+		["zh-cn"] = "被你施加异常的敌人死亡时，其身上全部异常状态会扩散至周围敌人。",
 	},
 	loc_cwah_arc_chain_title = {
 		en = "Chain Lightning",
+		["zh-cn"] = "连锁闪电",
 	},
 	loc_cwah_arc_chain_description = {
 		en = "Hits have a %s chance to arc lightning through up to %s nearby enemies, damaging and electrocuting each. An enemy the lightning has just passed through cannot start another arc for %s second(s).",
+		["zh-cn"] = "命中有%s概率释放闪电，最多连锁%s名附近敌人，造成伤害并施加电击。刚被闪电传导过的敌人%s秒内不会再次触发连锁。",
 	},
 	loc_cwah_multishot_title = {
 		en = "Multishot",
+		["zh-cn"] = "多重射击",
 	},
 	loc_cwah_multishot_description = {
 		en = "Ranged weapons fire %s shots at once, fanned out horizontally, for the same ammunition.",
+		["zh-cn"] = "远程武器一次消耗同等弹药，横向散射%s发子弹。",
 	},
 }

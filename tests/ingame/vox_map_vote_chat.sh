@@ -105,6 +105,17 @@ printf '  --   %s\n' "$cards"
 assert_not_contains "$cards" "nil|" "a chat vote opened"
 assert_contains "$cards" "|true|" "chat owns the round"
 
+# The picker draws the tally and the highlight ONLY in vote mode, and this used
+# to be keyed on the party rather than on a vote existing -- so a solo streamer
+# got a plain picker with no numbers on it while chat was actively voting.
+# Asserted on the view, not on mod.vote_counts: the counts were correct the
+# whole time, they were simply never drawn.
+assert_eq "$(dt '
+local ui = Managers.ui
+local view = ui and ui.view_instance and ui:view_instance("chaos_wastes_run_select_view")
+if not view then return "no-view" end
+return tostring(view._vote == true)')" "true" "the picker is in vote mode, so it draws the tally"
+
 WANTED=$(printf '%s' "$cards" | cut -d'|' -f3 | cut -d',' -f"$CHOICE")
 printf '  --   option %s is %s\n' "$CHOICE" "$WANTED"
 
@@ -139,21 +150,33 @@ assert_contains "$held" "end=true" "pressing Continue while chat votes is refuse
 
 # --- let it finish, then Continue should work ----------------------------
 
+# Watched through mod.chat_vote_winner, NOT VoxPopuli's vote status.
+#
+# CWaH resolves the moment the countdown ends -- that is what lets the winning
+# card light up while everyone is still looking at it -- and resolving consumes
+# the token, so VoxPopuli reports the vote as gone within a frame of it
+# finishing. Polling the token therefore races the very improvement it was
+# meant to observe, and reports "gone" for a vote that decided correctly.
+#
+# The winner is the durable signal, and it is also the one the picker draws.
 for ((i = 1; i <= 40; i++)); do
-	f=$(dt '
-local cw  = get_mod("ChaosWastesAtHome")
-local vox = get_mod("VoxPopuli")
-local st = cw._chat_vote_token and vox.external_vote_status(cw._chat_vote_token)
-if not st then return "gone" end
-return st.finished and ("finished|" .. tostring(st.winner_index)) or "running"
-')
+	f=$(dt 'local cw = get_mod("ChaosWastesAtHome")
+return "winner=" .. tostring(cw.chat_vote_winner and cw.chat_vote_winner())')
 	case "$f" in
-		finished*) printf '  --   %s\n' "$f"; break ;;
-		gone) break ;;
+		winner=nil) ;;
+		winner=*) printf '  --   %s\n' "$f"; break ;;
 	esac
 	sleep 2
 done
-assert_contains "$f" "finished|$CHOICE" "chat's choice won the vote"
+assert_eq "$f" "winner=$CHOICE" "chat's choice is recorded as the winner"
+
+# The picker reads exactly this, so a winner here is a highlighted card there.
+assert_contains "$(dt 'local cw = get_mod("ChaosWastesAtHome")
+local net = cw:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/net")
+local cards = net.vote_cards()
+local w = cw.chat_vote_winner()
+return tostring(w and cards[w] and cards[w].mission_name)')" \
+	"$WANTED" "and it is the card the picker will show as selected"
 
 dt 'Managers.multiplayer_session:leave("skip_end_of_round") return "pressed"' >/dev/null
 printf '  --   pressed Continue again once the vote had closed\n'

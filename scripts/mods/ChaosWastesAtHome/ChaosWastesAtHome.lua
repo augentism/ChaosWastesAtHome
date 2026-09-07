@@ -632,6 +632,12 @@ mod.vote_token = function ()
 	return net.vote_token()
 end
 
+--- Is the running vote chat's rather than the party's? The picker asks so it
+--- can say who a highlight belongs to.
+mod.vote_is_chat_owned = function ()
+	return net.is_chat_owned()
+end
+
 mod.my_vote = function ()
 	return net.my_vote()
 end
@@ -2002,6 +2008,7 @@ local function _start_chat_vote(cards)
 
 	mod._chat_vote_token = token
 	mod._chat_hold_told = nil
+	mod._chat_vote_result = nil
 
 	mod:info("the next mission is chat's: %d option(s), %.0fs", #cards, duration)
 	mod:echo(mod:localize("chat_vote_opened"))
@@ -2040,6 +2047,66 @@ local function _update_chat_vote(dt)
 	end
 
 	net.set_chat_tally(status.counts)
+
+	-- Resolved here, the frame chat's vote closes, rather than waiting for the
+	-- end screen to be dismissed. That is what lets the winning card light up
+	-- while everyone is still looking at it: the answer exists as soon as the
+	-- countdown ends, and holding it back until the screen closes means the
+	-- vote visibly finishes and then nothing happens.
+	if status.finished then
+		mod._resolve_chat_vote()
+	end
+end
+
+-- Turns the running chat vote into a decision, once.
+--
+-- Consumes the token, so the two end-screen exits and the poll above cannot
+-- resolve it twice -- the same reason _resolve_end_screen_vote consumes
+-- mod._vote_options.
+function mod._resolve_chat_vote()
+	local token = mod._chat_vote_token
+
+	if not token then
+		return mod._chat_vote_result
+	end
+
+	mod._chat_vote_token = nil
+
+	local vox = _voxpopuli()
+
+	if not vox then
+		return nil
+	end
+
+	-- finish_external_vote always answers: the winner if the vote ran its
+	-- course, whoever was ahead if it was closed early, and a random option if
+	-- nobody voted at all. That last rule lives in VoxPopuli rather than here
+	-- so it matches every other vote it runs.
+	local index, note = vox.finish_external_vote(token)
+
+	if not index then
+		mod:info("chat vote produced nothing (%s)", tostring(note))
+
+		return nil
+	end
+
+	mod._chat_vote_result = { index = index, note = note }
+
+	local cards = net.vote_cards()
+	local card = cards and cards[index]
+
+	mod:info("chat chose option %d (%s) - %s", index,
+		tostring(card and card.mission_name), tostring(note))
+	mod:echo(mod:localize("chat_vote_result",
+		card and chain.mission_display_name(card.mission_name) or ("#" .. index)))
+
+	return mod._chat_vote_result
+end
+
+--- The card chat settled on, for the picker to show as selected. nil until the
+--- vote closes.
+function mod.chat_vote_winner()
+	return mod._chat_vote_result and mod._chat_vote_result.index or nil
 end
 
 -- Is a chat vote still collecting answers?
@@ -2090,6 +2157,7 @@ function mod._release_chat_vote(why)
 	end
 
 	mod._chat_vote_token = nil
+	mod._chat_vote_result = nil
 
 	local vox = _voxpopuli()
 
@@ -2102,34 +2170,16 @@ end
 --
 -- Consumes the token, so the two end-screen exits cannot both resolve it -- the
 -- same reason _resolve_end_screen_vote consumes mod._vote_options.
+-- The viewers' answer, resolving it now if the screen is being dismissed before
+-- the countdown finished.
 local function _chat_vote_winner()
-	local token = mod._chat_vote_token
+	local result = mod._resolve_chat_vote()
 
-	if not token then
+	if not result then
 		return nil
 	end
 
-	mod._chat_vote_token = nil
-
-	local vox = _voxpopuli()
-
-	if not vox then
-		return nil
-	end
-
-	-- finish_external_vote always answers: the winner if the vote ran its
-	-- course, whoever was ahead if the screen was dismissed early, and a random
-	-- option if nobody voted at all. That last rule lives in VoxPopuli rather
-	-- than here so it matches every other vote it runs.
-	local index, note = vox.finish_external_vote(token)
-
-	if not index then
-		mod:info("chat vote produced nothing (%s)", tostring(note))
-
-		return nil
-	end
-
-	return index, note
+	return result.index, result.note
 end
 
 local function _vote_cards(options)
@@ -2266,7 +2316,11 @@ mod:hook_safe(StateGameScore, "_present_end_of_round_view", function (self)
 	Managers.ui:open_view(RUN_SELECT_VIEW, nil, nil, nil, nil, {
 		options = options,
 		selected_index = 1,
-		vote = party,
+		-- vote_open, NOT party. The picker draws the tally and the highlight
+		-- only in vote mode, and a chat vote runs with no other players at all
+		-- -- so keying this on the party meant a solo streamer got a plain
+		-- picker with no numbers on it while chat was actively voting.
+		vote = vote_open,
 	})
 end)
 
@@ -2347,12 +2401,13 @@ local function _resolve_end_screen_vote()
 		local chosen = options[chat_index]
 
 		if chosen then
+			-- Not announced again here: _resolve_chat_vote says it once, when
+			-- the vote actually closed, which is the moment worth narrating.
+			-- This path only records the decision.
 			run.state().next_mission = chosen
 
-			mod:info("chat chose option %d (%s) - %s",
-				chat_index, tostring(chosen.mission_name), tostring(chat_note))
-			mod:echo(mod:localize("chat_vote_result",
-				chain.mission_display_name(chosen.mission_name)))
+			mod:debug_log("applying chat's choice:", tostring(chosen.mission_name),
+				"|", tostring(chat_note))
 
 			return
 		end

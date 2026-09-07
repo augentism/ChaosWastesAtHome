@@ -257,10 +257,44 @@ RunSelectView._refresh_votes = function (self)
 	end
 
 	local voted = mod.my_vote and mod.my_vote() or nil
+
+	-- Once chat has decided, the winning card is the one shown as selected.
+	-- Without this the vote visibly ends and nothing on screen changes, which
+	-- reads as the result having been lost.
+	--
+	-- Guarded exactly like mod.my_vote above, and for the same reason: a view
+	-- re-executes every time it is opened while the main script only re-runs on
+	-- a fresh load, so a redeployed view can be newer than the facade it is
+	-- calling. Here that would be a nil call inside the draw path -- a hard
+	-- crash, not a caught error.
+	local chat_won = mod.chat_vote_winner and mod.chat_vote_winner() or nil
+	local chat_owned = mod.vote_is_chat_owned and mod.vote_is_chat_owned() or false
+
+	if chat_won then
+		voted = chat_won
+	end
+
 	local total = 0
 
+	local leader, best = nil, 0
+
 	for i = 1, #self._options do
-		total = total + (counts[i] or 0)
+		local votes = counts[i] or 0
+
+		total = total + votes
+
+		-- Strictly greater, so a tie keeps whoever got there first rather than
+		-- flipping the highlight between equal cards every frame.
+		if votes > best then
+			best, leader = votes, i
+		end
+	end
+
+	-- While chat is still voting, the highlight follows whoever is ahead, so
+	-- the card everyone is looking at is the one that would win right now. Once
+	-- the vote closes chat_won takes over and stops it moving.
+	if chat_owned and not chat_won and leader then
+		voted = leader
 	end
 
 	for i = 1, definitions.num_options do
@@ -280,10 +314,27 @@ RunSelectView._refresh_votes = function (self)
 
 	local mine = voted and self._options[voted]
 
-	self._widgets_by_name.subtitle.content.text = mine
-		and mod:localize("picker_vote_yours",
+	-- "chat chose X", not "your vote is X": the highlight means different
+	-- things depending on who was voting, and saying the wrong one is worse
+	-- than saying nothing.
+	if chat_won and mine then
+		self._widgets_by_name.subtitle.content.text = mod:localize(
+			"picker_vote_chat_won", chain.mission_display_name(mine.mission_name))
+	elseif chat_owned and mine then
+		-- "leading", not "chose": nothing is settled yet and the highlight can
+		-- still move, which the wording has to admit or it reads as a result.
+		self._widgets_by_name.subtitle.content.text = mod:localize(
+			"picker_vote_chat_leading",
 			chain.mission_display_name(mine.mission_name), total)
-		or mod:localize("picker_vote_subtitle", total)
+	elseif chat_owned then
+		self._widgets_by_name.subtitle.content.text =
+			mod:localize("picker_vote_chat_waiting")
+	else
+		self._widgets_by_name.subtitle.content.text = mine
+			and mod:localize("picker_vote_yours",
+				chain.mission_display_name(mine.mission_name), total)
+			or mod:localize("picker_vote_subtitle", total)
+	end
 end
 
 RunSelectView.update = function (self, dt, t, input_service)
