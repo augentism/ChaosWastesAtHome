@@ -791,6 +791,12 @@ return {
 		en = "Chaos Wastes: chat is choosing the next mission.",
 		["zh-cn"] = "单人混沌荒原：观众正在投票选择下一个任务。",
 	},
+	chat_picks_mission = {
+		en = "Let chat pick the next mission",
+	},
+	chat_picks_mission_description = {
+		en = "With VoxPopuli installed and connected to a chat, the end-of-round vote is handed to the viewers instead of the players. Turn this off to keep choosing yourself; it does nothing without VoxPopuli.",
+	},
 	-- While the viewers are still voting. %s = the mission in the lead, %d = votes cast.
 	picker_vote_chat_leading = {
 		en = "Chat is leaning towards %s (%d vote(s))",

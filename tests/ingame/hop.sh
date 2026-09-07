@@ -28,6 +28,29 @@ if ! game_is_up; then
 	exit 111
 fi
 
+# --- keep chat out of it ---------------------------------------------------
+#
+# This tests CWaH's OWN way off the end screen. With VoxPopuli installed and
+# connected, the next mission is handed to the viewers instead -- a chat vote
+# opens, Continue is held until it closes, and the party/solo path this script
+# exists for is never reached. On a machine set up to develop that integration
+# it would silently stop testing anything.
+#
+# So the integration is switched off for the duration, through the same setting
+# a player would use, and restored in a trap.
+CHAT_PICKS=$(dt 'return tostring(get_mod("ChaosWastesAtHome"):get("chat_picks_mission"))')
+restore_chat_picks() {
+	[ "$CHAT_PICKS" = "nil" ] && return 0
+	dt 'get_mod("ChaosWastesAtHome"):set("chat_picks_mission", '"$CHAT_PICKS"', false) return "ok"' >/dev/null
+	printf '  --   restored chat_picks_mission to %s\n' "$CHAT_PICKS"
+}
+trap restore_chat_picks EXIT
+
+if [ "$CHAT_PICKS" != "nil" ]; then
+	dt 'get_mod("ChaosWastesAtHome"):set("chat_picks_mission", false, false) return "ok"' >/dev/null
+	printf '  --   chat_picks_mission off for this run (was %s)\n' "$CHAT_PICKS"
+fi
+
 # --- launch --------------------------------------------------------------
 
 # Deliberately NOT asserted on the return value. chain.launch resets the

@@ -76,6 +76,11 @@ return {
 				range         = { 0, 180 },
 			},
 			{
+				setting_id    = "chat_picks_mission",
+				type          = "checkbox",
+				default_value = true,
+			},
+			{
 				setting_id = "group_testing",
 				type = "group",
 				sub_widgets = {

@@ -35,6 +35,13 @@ if [ "$(dt 'return get_mod("VoxPopuli") and "yes" or "no"')" != "yes" ]; then
 	exit 111
 fi
 
+# Armed explicitly. This suite proves the fallback fires because there is no end
+# screen left to spend -- but with the integration switched off (hop.sh does
+# that, and a crashed run leaves it that way) every assertion here would pass
+# for entirely the wrong reason: no chat vote, no chat_owned, run continues.
+# A test that cannot fail is worse than no test.
+dt 'get_mod("ChaosWastesAtHome"):set("chat_picks_mission", true, false) return "ok"' >/dev/null
+
 # --- squeeze the end screen ----------------------------------------------
 
 ORIGINAL=$(dt 'return tostring(get_mod("ChaosWastesAtHome"):get("end_screen_extra_seconds"))')

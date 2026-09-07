@@ -43,8 +43,16 @@ WORKSPACE = TESTS.parent.parent
 # did not start -- it hands the next mission to chat, so what comes up is
 # whatever the viewers (or, on a silent stream, chance) picked. Anything
 # asserting against a known mission has to run before it.
+# hop.sh first (it produces the live run the read-only scripts assert against),
+# then the VoxPopuli ones, which SKIP cleanly when VoxPopuli is not installed.
+#
+# hop.sh switches the VoxPopuli integration OFF for its own run so it still
+# exercises CWaH's party/solo path; the vox_* scripts switch it back on. Both
+# behaviours are covered on a machine that has both mods, which is the machine
+# where the integration is developed and therefore the one where losing that
+# coverage would go unnoticed.
 INGAME = ["hop.sh", "buff_pool.sh", "custom_buffs.sh", "activation.sh",
-          "vox_map_vote.sh", "vox_map_vote_fallback.sh"]
+          "vox_map_vote.sh", "vox_map_vote_fallback.sh", "vox_map_vote_chat.sh"]
 
 SKIP_EXIT = 111
 

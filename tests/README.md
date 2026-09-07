@@ -54,9 +54,18 @@ at a session you care about.
 | `activation.sh` | read-only: the buff system is never live without a launched run |
 | `vox_map_vote.sh` | the VoxPopuli seam: chat owns the end-of-round vote, players' clicks are refused, and it survives the mission gate closing. SKIPs without VoxPopuli |
 | `vox_map_vote_fallback.sh` | the other half of that seam: with no end screen to spare, CWaH decides for itself and the run still continues |
+| `vox_map_vote_chat.sh` | the whole loop for real — posts `!2` to Twitch, waits for it to come back over EventSub, and asserts the map chat voted for is the map that launched. **Posts in your chat** |
 
 `hop.sh` runs first, because the read-only scripts assert against a live run and
 it is what produces one.
+
+**The VoxPopuli scripts and `hop.sh` want opposite settings, and each sets its
+own.** With VoxPopuli connected, CWaH hands the next-mission choice to the
+viewers — so `hop.sh` would stop exercising the party/solo path it exists for.
+It switches `chat_picks_mission` off for its run and restores it in a trap; the
+`vox_*` scripts switch it back on rather than assuming, because a crashed run
+leaves it off and every one of their assertions would then pass for the wrong
+reason. A test that cannot fail is worse than no test.
 
 **Your character is standing still in a real mission the whole time.** These
 scripts force wins; they do not make anyone invulnerable, and the specials do not

@@ -1882,6 +1882,19 @@ local CHAT_VOTE_MIN = 10
 local CHAT_VOTE_MAX = 60
 
 local function _voxpopuli()
+	-- The player's own answer comes first. Somebody can have VoxPopuli
+	-- installed for the rest of what it does and still want to pick their own
+	-- maps, and without this there is no way to say so -- the moment it is
+	-- connected, chat takes the choice.
+	--
+	-- It is also what lets the mod's own end-screen tests exercise the party
+	-- and solo paths: with VoxPopuli installed those are otherwise
+	-- unreachable, so the behaviour would go untested on any machine set up to
+	-- develop the integration.
+	if mod:get("chat_picks_mission") == false then
+		return nil
+	end
+
 	local vox = get_mod and get_mod("VoxPopuli")
 
 	-- Checked by feature, not by version: an older VoxPopuli has no external

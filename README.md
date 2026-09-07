@@ -151,6 +151,10 @@ the end screen* is what gives chat room to answer; with too little left, it is
 skipped and the party (or your click) decides as usual. Everything degrades to
 the normal vote if VoxPopuli is absent, older, off or disconnected.
 
+**Turn it off with *Let chat pick the next mission*** (mod options) if you want
+VoxPopuli for everything else and would rather choose maps yourself. The setting
+does nothing without VoxPopuli.
+
 **Nobody is disconnected between missions.** The run moves the whole party
 straight from the scoreboard into the next mission with the session intact.
 Earlier versions restarted the host's session and had everyone reconnect; that
@@ -182,7 +186,8 @@ A few sit in the DMF mod options menu, marked below.
 | Environment chance | 50% | Havoc only: hunting grounds / ventilation purge / toxic gas |
 | How buffs are earned | objective only | Objectives, kills, a timer and terror events can each be switched on as sources |
 | When a vote ties | The host decides | Or *Whoever got there first*, or *Pick at random* |
-| Extra seconds on the end screen *(mod options)* | 30 | Solo end screens are very short by default |
+| Extra seconds on the end screen *(mod options)* | 30 | Solo end screens are very short by default. Also what gives chat room to answer the map vote |
+| Let chat pick the next mission *(mod options)* | on | With VoxPopuli connected, the viewers choose instead of the players. Off = you choose as usual. No effect without VoxPopuli |
 | Load Mortis assets *(mod options)* | on | Needed for buff icons and effects; ~0.5s warm, ~3s on the first load after launching the game, once per run |
 | Debug logging *(mod options)* | off | Turn on before reproducing a problem. Also enables a periodic custom-buff snapshot in the log |
 

@@ -31,6 +31,12 @@ if ! game_is_up; then
 	exit 111
 fi
 
+# The integration has an opt-out, and hop.sh turns it off to reach CWaH's own
+# path. A crashed run leaves it off, which would make this suite SKIP for a
+# reason that has nothing to do with the code -- so it is turned back on here
+# rather than assumed.
+dt 'get_mod("ChaosWastesAtHome"):set("chat_picks_mission", true, false) return "ok"' >/dev/null
+
 # --- the seam ------------------------------------------------------------
 
 seam=$(dt '
