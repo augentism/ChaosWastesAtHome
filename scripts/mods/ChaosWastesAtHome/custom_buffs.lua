@@ -15,10 +15,11 @@ local HordesBuffsUtilities = require("scripts/settings/buff/hordes_buffs/hordes_
 -- buff_extension_base, which reads the `Network` global at file scope, and that
 -- global does not exist yet while mods are loading at boot.
 local CheckProcFunctions = require("scripts/settings/buff/helper_functions/check_proc_functions")
-local HordesBuffsData = require("scripts/settings/buff/hordes_buffs/hordes_buffs_data")
-local MissionBuffsAllowedBuffs = require("scripts/managers/mission_buffs/mission_buffs_allowed_buffs")
-local MissionBuffsSettings = require("scripts/managers/mission_buffs/mission_buffs_settings")
 local Toughness = require("scripts/utilities/toughness/toughness")
+-- hordes_buffs_data, mission_buffs_allowed_buffs and mission_buffs_settings are
+-- NOT required here any more: writing to those tables is buff_registry's job
+-- now, and it requires them itself. It is loaded below rather than above, so
+-- BuffTemplates is still the first of this group to load.
 
 local attack_types = AttackSettings.attack_types
 local buff_categories = BuffSettings.buff_categories
@@ -44,6 +45,13 @@ local stat_buffs = BuffSettings.stat_buffs
 -- hundred lines apart is how you end up shipping one that crashes when picked.
 
 local custom_buffs = {}
+
+-- The registry that does the actual registering, shared with any addon mod.
+--
+-- Loaded before the counter table below, because it adopts and republishes
+-- mod._custom_buff_procs so this mod's proc counters and an addon's land in the
+-- same table and the same /cw_verify report.
+local registry = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_registry")
 
 -- Bumped by proc buffs when they fire, so /cw_verify can prove an effect ran
 -- rather than just that the buff is attached. A passive stat buff has nothing
@@ -82,18 +90,19 @@ local multishot = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHom
 -- every later read safe.
 local CATEGORY = "custom"
 
-MissionBuffsSettings.filtering_categories[CATEGORY] = CATEGORY
+-- Registered through the registry rather than written straight into
+-- filtering_categories, so this mod's own category goes through exactly the
+-- path an addon's does.
+registry.register_category(CATEGORY, {
+	label = "Custom",
+	owner = "ChaosWastesAtHome",
+})
 
 -- Scratch buffer for broadphase queries, reused rather than allocated per call.
 -- The engine's own buff templates each keep one of these at file scope for the
 -- same reason; a proc that runs on every kill in a horde should not be handing
 -- the collector a fresh table each time.
 local BROADPHASE_RESULTS = {}
-
--- Icons are reused from the shipped horde set. They are only loaded because the
--- mod pulls in the Mortis package -- a genuinely custom texture would need a
--- mod bundle, which is a much larger job.
-local ICON_ROOT = "content/ui/textures/icons/buffs/hud/horde_buffs/small_buffs/"
 
 -- Every buff this mod defines, in one list.
 --
@@ -102,7 +111,9 @@ local ICON_ROOT = "content/ui/textures/icons/buffs/hud/horde_buffs/small_buffs/"
 --   pool          true = offered in legendary picks. false/absent = a helper
 --                 applied by another buff, which still needs a name and a
 --                 network id but no card data and no pool membership
---   icon          short name, appended to ICON_ROOT. Pool entries only
+--   icon          short name, resolved against the shipped Mortis icon set by
+--                 the registry. Anything containing a "/" is taken as a full
+--                 path instead. Pool entries only
 --   values        optional array substituted into the description's %s slots,
 --                 in order. Numbers belong to the code; wording belongs to the
 --                 localization file, and this is the seam between them
@@ -491,9 +502,9 @@ _add({
 -- Established by SoloSandbox, whose stealth bestowment carries the same note.
 --
 -- No `pool` key, so it is registered and networked like every other template
--- here but never offered as a card. Being in the catalogue is what matters:
--- _all_template_names covers it, so its network id is part of what the peer
--- handshake compares, and the ids cannot silently disagree.
+-- here but never offered as a card. Being in the catalogue is what matters: the
+-- registry's all_template_names covers it, so its network id is part of what the
+-- peer handshake compares, and the ids cannot silently disagree.
 --
 -- predicted = false, matching the rest. SoloSandbox uses predicted = true to
 -- stay out of NetworkLookup entirely, which is right for a client-side solo
@@ -1202,7 +1213,12 @@ local LOCALIZATION_FILE = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/Chao
 --
 -- So string.format, at registration, once. Note the string DMF hands back is
 -- itself string.format'd on the way out, which is why _pct doubles its sign.
-local function _register_card_strings()
+-- This mod keeps its card text in its own localization file like every other
+-- string it owns, so this step only carries the per-language tables onto the
+-- entries. The substitution and the global registration happen in the registry,
+-- by exactly the same path an addon takes when it supplies its translations
+-- inline on the entry.
+local function _attach_card_strings()
 	local ok, strings = pcall(mod.io_dofile, mod, LOCALIZATION_FILE)
 
 	if not ok or type(strings) ~= "table" then
@@ -1211,179 +1227,42 @@ local function _register_card_strings()
 		return
 	end
 
-	local globals = {}
+	for _, entry in ipairs(CATALOGUE) do
+		if entry.pool then
+			local title_key = _title_key(entry.id)
+			local description_key = _description_key(entry.id)
 
-	local function _take(key, values)
-		local translations = strings[key]
-
-		-- Loud, because the quiet version is a card in the wild reading
-		-- "<loc_cwah_something_title>".
-		if type(translations) ~= "table" then
-			mod:error("localization key '%s' is missing - its card will show the key instead", key)
-
-			return
-		end
-
-		if not values then
-			globals[key] = translations
-
-			return
-		end
-
-		-- Formatted per language: the values and their order are the same
-		-- everywhere, the sentence around them is not.
-		local formatted = {}
-
-		for language, text in pairs(translations) do
-			local format_ok, result = pcall(string.format, text, unpack(values))
-
-			formatted[language] = format_ok and result or text
-
-			if not format_ok then
-				mod:error("localization key '%s' (%s) does not match its values: %s",
-					key, tostring(language), tostring(result))
+			-- Loud, because the quiet version is a card in the wild reading
+			-- "<loc_cwah_something_title>".
+			if type(strings[title_key]) ~= "table" then
+				mod:error("localization key '%s' is missing - its card will show the key instead", title_key)
 			end
-		end
 
-		globals[key] = formatted
-	end
+			if type(strings[description_key]) ~= "table" then
+				mod:error("localization key '%s' is missing - its card will show the key instead", description_key)
+			end
 
-	for _, entry in ipairs(CATALOGUE) do
-		if entry.pool then
-			_take(_title_key(entry.id))
-			_take(_description_key(entry.id), entry.values)
+			entry.title = strings[title_key]
+			entry.description = strings[description_key]
 		end
 	end
-
-	-- One-way: add_global_localize_strings refuses to overwrite a key it already
-	-- holds. A mod reload therefore keeps the card text from the first load, so
-	-- editing a description needs a full restart to see.
-	mod:add_global_localize_strings(globals)
 end
 
-_register_card_strings()
-
--- Every template also needs an entry in the network lookup.
+-- Registration goes through buff_registry, which is the same path an addon mod
+-- takes. Everything that used to live here -- the five registrations, the
+-- network ids, the card strings, the pool append -- is over there now, with the
+-- reasoning that earned each step.
 --
--- NetworkLookup.buff_templates is built once at boot from whatever is in
--- BuffTemplates at that moment, and mods load afterwards -- so a template added
--- by a mod is never in it. PlayerUnitBuffExtension._add_rpc_synced_buff reads
--- the id unconditionally, *before* it checks whether the player is even remote,
--- and the lookup's metatable errors on an unknown key rather than returning
--- nil. So applying a custom buff crashes in solo too, despite nothing ever
--- going over the wire.
---
--- The lookup is bidirectional -- lookup[i] = name and lookup[name] = i -- and
--- only __index is guarded, so appending is allowed. Membership has to be tested
--- with rawget: a plain read of a missing key is the crash itself.
---
--- Solo-only *today*, but deliberately not solo-only by construction.
---
--- The id is an index into a table no vanilla peer has, so it must never be
--- transmitted -- which holds because a solo session has no remote players. If a
--- peer-to-peer path ever exists and every peer runs this mod, the indices only
--- agree if every machine computes the same one for the same name. So the names
--- are appended in SORTED order (see register_network_lookup), which makes an
--- index a pure function of the name set rather than of catalogue order.
---
--- What that still does not survive: peers on different mod versions (different
--- name sets), or another mod appending to the same lookup, since the base offset
--- then depends on mod_load_order.txt. Both would need a version handshake.
---
--- Idempotent, and called again per mission in case the mod loaded before
--- NetworkLookup existed.
-custom_buffs.ensure_network_id = function (buff_name)
-	local network_lookup = rawget(_G, "NetworkLookup")
-	local buff_lookup = network_lookup and network_lookup.buff_templates
+-- These stay as named delegates rather than being inlined at their call sites:
+-- the main script, net.lua and the chat commands all reach for them, and
+-- renaming them would be churn for no gain.
+custom_buffs.ensure_network_id = registry.ensure_network_id
+custom_buffs.network_id_map = registry.network_id_map
+custom_buffs.register_network_lookup = registry.register_network_lookup
 
-	if not buff_lookup then
-		mod:error("NetworkLookup.buff_templates missing - custom buffs will crash when applied")
-
-		return false
-	end
-
-	if not rawget(buff_lookup, buff_name) then
-		local index = #buff_lookup + 1
-
-		buff_lookup[index] = buff_name
-		buff_lookup[buff_name] = index
-
-		mod:debug_log("network lookup: %s = %d", buff_name, index)
-	end
-
-	return true
-end
-
--- Every template the mod defines, pickable or not, sorted.
---
--- Sorted rather than catalogue order so the network ids assigned below are a
--- pure function of the name set. Reordering the catalogue then cannot change an
--- id, which is what a future peer-to-peer path would need.
-local function _all_template_names()
-	local names = {}
-
-	for _, entry in ipairs(CATALOGUE) do
-		names[#names + 1] = entry.id
-	end
-
-	table.sort(names)
-
-	return names
-end
-
--- Just the pickable ones, in catalogue order -- this only drives the pool and
--- the menu, where the author's ordering is the useful one.
-local function _pool_names()
-	local names = {}
-
-	for _, entry in ipairs(CATALOGUE) do
-		if entry.pool then
-			names[#names + 1] = entry.id
-		end
-	end
-
-	return names
-end
-
--- The ids this mod assigned, in sorted name order: the thing two peers have to
--- agree on before a custom buff can cross the wire.
---
--- Names alone are not enough. An id is `#buff_lookup + 1` at append time, so
--- two machines with an identical mod version still disagree if some *other*
--- mod appended to NetworkLookup.buff_templates first -- which makes the base
--- offset a function of mod_load_order.txt. Comparing the assigned ids catches
--- that; comparing a version string does not.
---
--- Returned as "name=id" strings rather than a hash so a mismatch names itself
--- in the log. There are a dozen entries; the payload is nothing.
-custom_buffs.network_id_map = function ()
-	local network_lookup = rawget(_G, "NetworkLookup")
-	local buff_lookup = network_lookup and network_lookup.buff_templates
-
-	if not buff_lookup then
-		return nil
-	end
-
-	local entries = {}
-
-	for _, buff_name in ipairs(_all_template_names()) do
-		local id = rawget(buff_lookup, buff_name)
-
-		entries[#entries + 1] = string.format("%s=%s", buff_name, tostring(id))
-	end
-
-	return entries
-end
-
-custom_buffs.register_network_lookup = function ()
-	local ok = true
-
-	for _, buff_name in ipairs(_all_template_names()) do
-		ok = custom_buffs.ensure_network_id(buff_name) and ok
-	end
-
-	return ok
-end
+-- Every pickable buff the registry knows about, this mod's and any addon's. The
+-- report and the chat command both want the whole picture rather than just ours.
+local _pool_names = registry.pool_names
 
 local registered = false
 
@@ -1394,74 +1273,18 @@ custom_buffs.register = function ()
 
 	registered = true
 
-	-- Build every template from its catalogue entry, then everything the buff
-	-- system needs alongside it. One loop, so a new entry cannot be half
-	-- registered.
-	for _, entry in ipairs(CATALOGUE) do
-		local template
+	_attach_card_strings()
 
-		if entry.template then
-			template = entry.template()
-		elseif entry.stat_buffs then
-			-- The shorthand: a plain passive buff.
-			template = {
-				class_name = "buff",
-				max_stacks = 1,
-				max_stacks_cap = 1,
-				predicted = false,
-				buff_category = buff_categories.hordes_buff,
-				stat_buffs = entry.stat_buffs,
-			}
-		else
-			mod:error("catalogue entry '%s' has neither a template nor stat_buffs - skipped",
-				tostring(entry.id))
-		end
-
-		if template then
-			-- Every template needs a `name` matching its key.
-			--
-			-- The game sets this for shipped buffs when it assembles
-			-- BuffTemplates (`template.name = template.name or name`), so a
-			-- template added straight into the table never gets one.
-			-- BuffExtensionBase._add_buff then uses it as a table key for stack
-			-- tracking, and a nil key crashes the moment the buff is applied --
-			-- not when it is offered, so the card looks fine right up until you
-			-- pick it.
-			template.name = template.name or entry.id
-
-			BuffTemplates[entry.id] = template
-
-			-- Card data for the pickable ones only. filter_category is mandatory
-			-- and easy to forget by hand: init_legendary_buffs_pool_for_player
-			-- indexes the pool table by it and inserts into the result, so
-			-- omitting it is a nil-index crash at mission start, a long way from
-			-- the buff that caused it.
-			if entry.pool then
-				HordesBuffsData[entry.id] = {
-					title = _title_key(entry.id),
-					description = _description_key(entry.id),
-					icon = entry.icon and (ICON_ROOT .. entry.icon) or nil,
-					is_family_buff = entry.is_family_buff or false,
-					filter_category = CATEGORY,
-				}
-			end
-		end
-	end
+	registry.register_buffs(mod, CATALOGUE, {
+		prefix = "cwah_",
+		category = CATEGORY,
+		category_label = "Custom",
+	})
 
 	-- Published on `mod` rather than exported, because buff_pool needs it and
 	-- loading this module from there would give it a second copy of everything
 	-- (io_dofile does not cache). Same channel as the proc counters.
-	local default_off = {}
-
-	for _, entry in ipairs(CATALOGUE) do
-		if entry.pool and entry.default_off then
-			default_off[entry.id] = true
-		end
-	end
-
-	mod._default_off_buffs = default_off
-
-	custom_buffs.register_network_lookup()
+	mod._default_off_buffs = registry.default_off()
 
 	-- The cascade pool names shipped templates rather than ones we define, so a
 	-- game patch renaming one would otherwise show up as a status effect that
@@ -1484,44 +1307,24 @@ custom_buffs.register = function ()
 	mod:info("status cascade recognises %d status-effect template(s)", status_count)
 
 	custom_buffs.install_hooks()
-
-	local generic = MissionBuffsAllowedBuffs.legendary_buffs.generic
-	local pool = _pool_names()
-
-	for _, buff_name in ipairs(pool) do
-		local already = false
-
-		for _, existing in ipairs(generic) do
-			if existing == buff_name then
-				already = true
-
-				break
-			end
-		end
-
-		if not already then
-			generic[#generic + 1] = buff_name
-		end
-	end
-
-	mod:info("registered %d custom buff(s) in category '%s' (%d template(s) total)",
-		#pool, CATEGORY, #CATALOGUE)
 end
 
 -- How often the custom category comes up relative to the shipped ones.
 --
 -- _pop_legendary_buff_from_players_pool weights categories per wave and falls
--- back to 1 for anything it does not recognise, so this only needs to write the
--- entries it wants to differ. Applied per mission because the setting can
--- change between them.
+-- back to 1 for anything it does not recognise. Applied per mission because the
+-- setting can change between them; the registry writes every registered
+-- category in the same pass, so an addon's weight lands here too.
 custom_buffs.apply_weight = function ()
 	local weight = mod:get("custom_buff_weight") or 1
 
-	for _, rates in pairs(MissionBuffsSettings.filtering_categories_pick_rate_per_wave) do
-		rates[CATEGORY] = weight
-	end
+	registry.apply_weights(function (id)
+		if id == CATEGORY then
+			return weight
+		end
+	end)
 
-	mod:debug_log("custom buff category weight set to", weight)
+	mod:debug_log("custom buff category weight set to %s", tostring(weight))
 end
 
 -- ---------------------------------------------------------------------------

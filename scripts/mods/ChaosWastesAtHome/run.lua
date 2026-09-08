@@ -8,6 +8,12 @@ local mod = get_mod("ChaosWastesAtHome")
 
 local run = {}
 
+-- For the run_start / run_end lifecycle events an addon can subscribe to. Safe
+-- to load here for the same reason it is safe everywhere else: the registry
+-- keeps its state on the `mod` table, so a second io_dofile is the same
+-- registry rather than a second one.
+local registry = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_registry")
+
 mod._run = mod._run or {
 	-- Set the moment the launcher commits, and the thing that makes a run
 	-- opt-in. `active` cannot serve this purpose: it is set as a consequence of
@@ -51,6 +57,8 @@ end
 
 run.mark_launched = function ()
 	state.launched = true
+
+	registry.notify("run_start")
 end
 
 run.depth = function ()
@@ -245,6 +253,15 @@ end
 run.reset = function (reason)
 	if state.active or state.next_mission then
 		mod:info("run ended (%s) after %d mission(s)", tostring(reason), state.missions_completed)
+
+		-- Fired before the wipe below, so an addon writing down per-run state
+		-- can still read what the run was. Only when a run was actually under
+		-- way: reset is also the "make sure nothing is left over" call, and an
+		-- addon should not see a run end that never began.
+		registry.notify("run_end", {
+			reason = reason,
+			depth = state.missions_completed,
+		})
 	end
 
 	state.launched = false
@@ -600,13 +617,24 @@ run.restore = function (dt)
 			local count = 0
 
 			for buff_name, stacks in pairs(record.buffs) do
-				local missing = stacks - (held[buff_name] or 0)
+				-- A carried buff whose template no longer exists is skipped
+				-- rather than granted. This is what an uninstalled addon looks
+				-- like from here: the run wrote the name down while the pack was
+				-- installed, and the save outlives the mod. Granting it anyway
+				-- reaches BuffExtensionBase with a template of nil, which is a
+				-- crash on restore rather than a missing buff.
+				if not registry.template_exists(buff_name) then
+					mod:warning("carried buff '%s' has no template any more - skipping it. An addon that added it is probably no longer installed.",
+						tostring(buff_name))
+				else
+					local missing = stacks - (held[buff_name] or 0)
 
-				for _ = 1, missing do
-					Managers.event:trigger("mission_buffs_event_add_externally_controlled_to_player",
-						player, buff_name)
+					for _ = 1, missing do
+						Managers.event:trigger("mission_buffs_event_add_externally_controlled_to_player",
+							player, buff_name)
 
-					count = count + 1
+						count = count + 1
+					end
 				end
 			end
 

@@ -136,6 +136,7 @@ a.fail = fail
 -- green suite worthless.
 local FILES = {
 	"test_game_mode_shim",
+	"test_buff_registry",
 	"test_buff_pool",
 	"test_run",
 	"test_difficulty",

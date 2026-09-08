@@ -240,6 +240,21 @@ local settings_store = {}
 
 harness.settings = settings_store
 
+-- DMF's global localization database, which is what makes a mod-registered card
+-- key resolve through Managers.localization rather than only through
+-- mod:localize. One flat table shared by every mod in the real thing, and it
+-- refuses to overwrite a key it already holds -- both of which the registry
+-- depends on, so the stub reproduces them rather than just recording the call.
+harness.global_localization = {}
+
+function mod:add_global_localize_strings(text_translations)
+	for text_id, translations in pairs(text_translations) do
+		if harness.global_localization[text_id] == nil then
+			harness.global_localization[text_id] = translations
+		end
+	end
+end
+
 function mod:get(id)
 	return settings_store[id]
 end
@@ -376,6 +391,16 @@ harness.reset = function ()
 	mod.role = "host"
 	mod._default_off_buffs = nil
 	mod.custom_buff_id_map = {}
+
+	-- The buff registry is state-on-mod for the same reason, and it accumulates
+	-- across registrations rather than being rebuilt -- so without this, one
+	-- test's categories and default-off buffs are visible to the next.
+	mod._buff_registry_state = nil
+	mod._custom_buff_procs = nil
+
+	for k in pairs(harness.global_localization) do
+		harness.global_localization[k] = nil
+	end
 
 	mod.is_host = function ()
 		return true

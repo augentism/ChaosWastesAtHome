@@ -3,6 +3,12 @@ local mod = get_mod("ChaosWastesAtHome")
 local HordesBuffsData = require("scripts/settings/buff/hordes_buffs/hordes_buffs_data")
 local MissionBuffsAllowedBuffs = require("scripts/managers/mission_buffs/mission_buffs_allowed_buffs")
 
+-- Safe to load from here, unlike custom_buffs: the registry keeps all of its
+-- state on the `mod` table precisely so that more than one io_dofile of it is
+-- the same registry rather than a second one. This file is loaded both by the
+-- main script and by the toggle view, so that matters.
+local registry = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_registry")
+
 -- Which buffs are allowed into the roll pools, and the catalogue the toggle
 -- view is built from.
 --
@@ -25,7 +31,6 @@ local CUSTOM_CATEGORY = "custom"
 -- Group ids are persistence-free (they only drive the filter list), but the
 -- buff names inside them are the save keys.
 local GROUP_LEGENDARY = "legendary_generic"
-local GROUP_CUSTOM = "custom"
 
 local catalogue = nil
 
@@ -67,10 +72,20 @@ local function _add(group, name)
 	end
 end
 
-local function _is_custom(name)
+-- The registered category a buff belongs to, or nil for a shipped one.
+--
+-- Read off the buff's own card data rather than by asking the registry whether
+-- it owns the name, so a category registered by a mod that then failed to
+-- register its buffs cannot produce an empty tab.
+local function _registered_category(name)
 	local data = HordesBuffsData[name]
+	local category = data and data.filter_category
 
-	return data ~= nil and data.filter_category == CUSTOM_CATEGORY
+	if category and registry.is_registered_category(category) then
+		return category
+	end
+
+	return nil
 end
 
 local function _build_catalogue()
@@ -105,13 +120,34 @@ local function _build_catalogue()
 
 	local legendary = MissionBuffsAllowedBuffs.legendary_buffs or {}
 	local generic_group = _new_group(GROUP_LEGENDARY, mod:localize("buff_group_legendary"))
-	local custom_group = _new_group(GROUP_CUSTOM, mod:localize("buff_group_custom"))
 
+	-- One tab per registered category, built lazily so a mod that registers a
+	-- category and no buffs does not leave an empty one behind.
+	--
 	-- Custom buffs live in legendary_buffs.generic alongside the shipped ones
 	-- (that is how they become rollable), so they are split back out here by
-	-- their filter_category to give them a filter tab of their own.
+	-- their filter_category. This mod's own category keeps its existing
+	-- localized label; an addon's tab is named after the addon.
+	local category_groups = {}
+
+	local function _category_group(category)
+		local group = category_groups[category]
+
+		if not group then
+			local label = category == CUSTOM_CATEGORY and mod:localize("buff_group_custom")
+				or registry.category_label(category)
+
+			group = _new_group(category, label)
+			category_groups[category] = group
+		end
+
+		return group
+	end
+
 	for _, name in ipairs(legendary.generic or {}) do
-		_add(_is_custom(name) and custom_group or generic_group, name)
+		local category = _registered_category(name)
+
+		_add(category and _category_group(category) or generic_group, name)
 	end
 
 	groups[#groups + 1] = generic_group
@@ -141,8 +177,14 @@ local function _build_catalogue()
 		end
 	end
 
-	if #custom_group.names > 0 then
-		groups[#groups + 1] = custom_group
+	-- In registration order rather than pairs() order, so the tabs do not move
+	-- around between launches.
+	for _, category in ipairs(registry.category_ids()) do
+		local group = category_groups[category]
+
+		if group and #group.names > 0 then
+			groups[#groups + 1] = group
+		end
 	end
 
 	-- Titles are resolved here rather than at load: Managers.localization does
@@ -266,11 +308,11 @@ local function _enabled_table()
 	return type(stored) == "table" and stored or {}
 end
 
--- Read from `mod` rather than imported: custom_buffs publishes it there during
--- registration, and requiring that module from here would load a second copy of
--- it (mod:io_dofile re-executes rather than caching).
+-- Read from the registry, which covers addon buffs as well as this mod's own.
+-- custom_buffs still publishes the same table as mod._default_off_buffs for
+-- anything outside this file that took a reference to it.
 local function _is_default_off(name)
-	local defaults = mod._default_off_buffs
+	local defaults = registry.default_off()
 
 	return defaults ~= nil and defaults[name] == true
 end

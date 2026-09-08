@@ -41,6 +41,10 @@ local spawn_guard = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtH
 local asset_loader = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/asset_loader")
 local custom_buffs = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/custom_buffs")
 local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_pool")
+-- Safe to load alongside custom_buffs, unlike most modules here: the registry
+-- keeps every piece of its state on the `mod` table so that a second io_dofile
+-- is the same registry rather than a second one.
+local registry = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_registry")
 local escape = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/escape")
 local solo = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/solo")
 local loadouts = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/loadouts")
@@ -584,6 +588,54 @@ custom_buffs.register()
 -- which re-executes and would be a second registration.
 mod.custom_buff_id_map = custom_buffs.network_id_map
 
+-- ---------------------------------------------------------------------------
+-- The addon API
+-- ---------------------------------------------------------------------------
+--
+-- What another mod calls to add buffs of its own, so a card pack can be its own
+-- mod instead of a fork of this one. The whole surface:
+--
+--   local cwah = get_mod("ChaosWastesAtHome")
+--
+--   cwah.register_buffs(mod, ENTRIES, { prefix = "mymod_", category = "mymod" })
+--   cwah.register_buff_category(id, { label = ..., weight = ... })
+--   cwah.subscribe(mod, "run_start", fn)
+--   cwah.count_buff_proc("mymod_thing_fired")
+--   cwah.manager / cwah.is_host() / cwah.has_authority() / cwah.is_true_solo_session()
+--
+-- Call register_buffs from your own on_all_mods_loaded. Registration is
+-- immediate rather than batched into a finalize step, which is what makes load
+-- order irrelevant -- by then get_mod resolves us whatever the order in
+-- mod_load_order.txt, and there is deliberately no "you must load above/below
+-- ChaosWastesAtHome" rule to get wrong.
+--
+-- Probe by feature, not by version: `type(cwah.register_buffs) == "function"`.
+-- The number below only distinguishes shapes that a feature test cannot.
+mod.ADDON_API_VERSION = 1
+
+mod.register_buffs = registry.register_buffs
+mod.register_buff_category = registry.register_category
+mod.subscribe = registry.subscribe
+
+-- Shared with this mod's own buffs, so an addon's procs show up in /cw_verify
+-- next to ours rather than in a report of their own.
+mod.count_buff_proc = registry.count
+mod.buff_proc_counters = registry.counters
+mod.register_buff_reading = registry.register_reading
+
+-- Whether this session is one nobody else is in.
+--
+-- The three facades an addon's buff effects actually need are this, mod.manager
+-- and mod.is_host/has_authority -- measured against a 130-card third-party
+-- catalogue, which reached for nothing else of ours.
+--
+-- Deliberately stricter than is_host: a card that spawns companions or rewrites
+-- an attack is only safe to run where there is no other player to desync, and
+-- "I am the host" is true in a session with three other people in it.
+mod.is_true_solo_session = function ()
+	return mod.manager ~= nil and mod.is_host() and not mod.has_peers()
+end
+
 -- Grants a named buff through the mission-buffs system, which is what makes it
 -- part of the run and therefore something run.capture will carry forward.
 --
@@ -871,6 +923,16 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 
 	mod:info("Mortis buff system active in game mode '%s' as %s",
 		_escape(game_mode_name), role)
+
+	-- Last, so an addon's callback sees a fully set-up mission: the manager,
+	-- the role and the run depth are all readable by this point. Errors inside
+	-- a callback are caught by notify -- this runs inside mission setup, where
+	-- an uncaught one is a hard crash rather than a bad frame.
+	registry.notify("mission_start", {
+		role = role,
+		depth = run.depth(),
+		game_mode_name = game_mode_name,
+	})
 end)
 
 -- Mortis asks the title backend for buff-family weights and a deactivated-buff
@@ -1277,6 +1339,14 @@ mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (s
 	if mod.role == ROLES.client then
 		client_hold = CLIENT_HOLD_SECONDS
 	end
+
+	-- Also before the clearing below, and for the same reason run.capture is:
+	-- an addon writing down its own per-mission state needs the manager and the
+	-- role still readable. After this point they are gone.
+	registry.notify("mission_end", {
+		role = mod.role,
+		depth = run.depth(),
+	})
 
 	mod.manager = nil
 	mod.game_mode = nil

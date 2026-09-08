@@ -97,6 +97,12 @@ return {
 	-- roll them; the catalogue splits them back out by filter_category. If that
 	-- split broke, ours would show up in the stock legendary tab.
 	{ "custom buffs are split out of the generic legendary group", function (a)
+		-- The category has to be REGISTERED for the split to happen, not merely
+		-- named on the buff's card data. A filter_category nobody registered
+		-- belongs to no addon, so its buffs stay in the generic group rather
+		-- than conjuring a tab out of a typo.
+		harness.load("buff_registry").register_category("custom", { label = "Custom" })
+
 		local hordes = require(HORDES)
 		hordes.cwah_test_marker = { filter_category = "custom", title = "loc_marker" }
 
@@ -185,7 +191,10 @@ return {
 		local pool = load_pool()
 		local name = any_name(pool)
 
-		harness.mod._default_off_buffs = { [name] = true }
+		-- Written through the registry, which is where "default off" lives now:
+		-- an entry registered with default_off = true lands in this same table,
+		-- whether it came from this mod or an addon.
+		harness.load("buff_registry").default_off()[name] = true
 
 		a.falsy(pool.is_enabled(name), name .. " enabled before any choice")
 		a.eq(pool.disabled_count(), 1, "disabled_count counts an untouched default-off buff")
@@ -282,7 +291,7 @@ return {
 		local pool = load_pool()
 		local name = any_name(pool)
 
-		harness.mod._default_off_buffs = { [name] = true }
+		harness.load("buff_registry").default_off()[name] = true
 
 		local exclude = {}
 		pool.apply_exclusions(exclude)
