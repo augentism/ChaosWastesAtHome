@@ -137,6 +137,10 @@ a.fail = fail
 local FILES = {
 	"test_game_mode_shim",
 	"test_buff_registry",
+	"test_buff_pack_compat",
+	"test_buff_namespaces",
+	"test_cwah_multishot",
+	"test_cwah_catalogue",
 	"test_buff_pool",
 	"test_run",
 	"test_difficulty",

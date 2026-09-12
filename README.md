@@ -39,6 +39,30 @@ Optional:
 
 ## How a run works
 
+### Optional buff packs
+
+Install **CwahBuffs**, **MourningBound**, or both alongside ChaosWastesAtHome,
+and list each installed mod in `mod_load_order.txt`. The order of these three
+mods does not matter.
+
+- **CwahBuffs** supplies the original nine custom cards.
+- **MourningBound** supplies its additional blessings and upgrades. Identical
+  copies of toughness on elite kills, crit ramp, attack-speed ramp, Flayer,
+  Proliferation and Chain Lightning (including their automatic copied tiers)
+  have been removed. Install CwahBuffs if you want those cards.
+- **Both enabled** offers both packs. MourningBound's distinct damage, cascade
+  and multishot variants have separate IDs and marked card titles. Use the
+  separate Rollable Buffs tabs to choose which cards can appear.
+
+Update both packs for compatibility. Restart the game after installing,
+removing, or enabling/disabling a pack; registration happens at startup.
+CwahBuffs IDs stay unchanged. MourningBound's three overlapping variants now
+use `cwah_mourningbound_*` IDs; reselect those variants in Rollable Buffs and
+start a fresh run when upgrading from the old pack. Old shared IDs cannot
+identify which pack's version was saved.
+
+### Starting a run
+
 1. Press your menu key — **at character select, or in the Mourningstar**. The
    launcher offers a **difficulty
    slider** — Malice, Heresy, Damnation, Auric, then Havoc 25 / 30 / 35 / 40 —

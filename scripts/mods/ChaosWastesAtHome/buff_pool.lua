@@ -150,6 +150,15 @@ local function _build_catalogue()
 		_add(category and _category_group(category) or generic_group, name)
 	end
 
+	-- Gated buffs are deliberately NOT in legendary_buffs.generic -- that is how
+	-- they stay unofferable until their prerequisite lands -- so a catalogue
+	-- built only from that pool would never list an upgrade card, and a player
+	-- could not switch one off before it unlocked. Added from the registry
+	-- instead, into the same category tab as everything else the addon owns.
+	for _, entry in ipairs(registry.gated_pool_entries()) do
+		_add(_category_group(entry.category), entry.id)
+	end
+
 	groups[#groups + 1] = generic_group
 
 	local archetypes = {}

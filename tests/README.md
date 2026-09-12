@@ -17,6 +17,15 @@ nix develop ./nix --command python3 ChaosWastesAtHome/tests/run_tests.py -k diff
 
 A closed game reports **SKIPPED**, not failed.
 
+In-game runs **close Darktide when finished**, even if it was already running.
+Cleanup also runs after test failures, exceptions, and Ctrl+C. Add `--keep-open`
+to leave the game running for inspection; `--close` is accepted but no longer
+required. Offline-only runs never close the game. A failed `--start` or failed
+shutdown reports failure.
+
+Runner lifecycle tests (mocked game processes):
+`nix develop path:./nix --command python3 -m unittest discover -s ChaosWastesAtHome/tests -p 'test_runner.py'`.
+
 ## offline/ — LuaJIT, no game
 
 Runs against the game's **real data**: `require` is redirected at
@@ -27,6 +36,10 @@ families. "Every buff we offer is a real buff" therefore means something.
 | file | covers |
 | --- | --- |
 | `test_buff_pool.lua` | the catalogue, the enabled/disabled two-set invariant, exclusions, family offering |
+| `test_buff_pack_compat.lua` | independent addon startup alone/together, both load orders, disabled packs |
+| `test_buff_namespaces.lua` | colliding local IDs, helper callbacks, independent text, upgrade prerequisites and factory invocation |
+| `test_cwah_multishot.lua` | real CwahBuffs hooks: five-shot fans, aimed shot preservation, activation guards, recursion, error recovery, staff arrays and launch argument flow |
+| `test_cwah_catalogue.lua` | nine original cards and three helpers, idempotent registration, all card translations through both formatting passes, crit and attack-speed ramp contracts |
 | `test_run.lua` | run state, `trim_pools`, and `capture`'s merge-don't-overwrite rule |
 | `test_difficulty.lua` | the danger ladder, the Havoc ramp and its cap, `build_havoc_data`'s positional format |
 | `test_net_vote.lua` | tallying and all three tiebreak rules |
@@ -134,5 +147,11 @@ when this suite was written.
   still need two instances and two accounts, and stay manual.
 - **`loadouts.list()`**, which shells out to `io.popen('dir ...')` against
   Windows `cmd.exe`.
-- **Anything about what a buff does.** These assert on this mod's behaviour, not
-  the game's.
+- **Engine buff effects.** Offline tests exercise selected CwahBuffs callbacks
+  and hook arguments, with game stubs. Actual damage, engine stack removal,
+  projectile physics and status-effect propagation still need live testing.
+- **MourningBound-specific buffs.** The fork's applicable multishot and
+  catalogue/localization tests were adapted to CwahBuffs; its tiers, proc
+  chances and exclusive mechanics are excluded. Addon entrypoint smoke tests
+  still cover both packs loading together, without loading MourningBound's
+  buff catalogue.

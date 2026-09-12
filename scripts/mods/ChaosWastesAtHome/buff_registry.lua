@@ -105,6 +105,10 @@ local ICON_ROOT = "content/ui/textures/icons/buffs/hud/horde_buffs/small_buffs/"
 
 local DEFAULT_CATEGORY = "custom"
 
+-- How many individual rejection or warning lines one register_buffs call may
+-- write before it stops naming them and just counts. See the report helper.
+local LOG_LINE_CAP = 8
+
 -- ---------------------------------------------------------------------------
 -- Localization keys
 -- ---------------------------------------------------------------------------
@@ -134,13 +138,64 @@ local function _is_string(value)
 	return type(value) == "string" and value ~= ""
 end
 
+local function _owner_name(addon)
+	if type(addon) == "table" and type(addon.get_name) == "function" then
+		return addon:get_name()
+	end
+
+	return addon
+end
+
+-- Include the length so owner/id boundaries cannot collide even when either
+-- contains underscores. Never choose a name based on who registered first.
+local function _id_prefix(addon)
+	local owner = _owner_name(addon)
+	assert(_is_string(owner), "buff_id needs an addon name")
+	return "cwah_addon_" .. #owner .. "_" .. owner .. "_"
+end
+
+registry.buff_id = function (addon, id)
+	assert(_is_string(id), "buff_id needs a local buff id")
+
+	return _id_prefix(addon) .. id
+end
+
+local function _prepare_entry(source, addon)
+	if type(source) ~= "table" or not _is_string(source.id) then
+		return source
+	end
+
+	-- Do not rewrite the author's catalogue in place: it may be registered
+	-- again, or its factories may close over that very table.
+	local entry = {}
+	for key, value in pairs(source) do entry[key] = value end
+	local function resolve(id) return registry.buff_id(addon, id) end
+	entry.local_id = source.id
+	entry.id = resolve(source.id)
+	entry.context = { id = entry.id, resolve = resolve }
+	for _, field in ipairs({ "upgrade_of", "unlock_after" }) do
+		if _is_string(entry[field]) then entry[field] = resolve(entry[field]) end
+	end
+	for _, field in ipairs({ "requires_all", "requires_any" }) do
+		if type(entry[field]) == "table" then
+			entry[field] = {}
+			for i, id in ipairs(source[field]) do
+				entry[field][i] = _is_string(id) and resolve(id) or id
+			end
+		end
+	end
+
+	return entry
+end
+
 -- Translations are { en = "...", ko = "..." }. Every value must survive
 -- string.format, because DMF runs localization strings through it on the way
 -- out and safe_string_format catches the error and returns NIL -- so a stray %
 -- turns the card title into nil with one log line per lookup, and nothing else.
 local function _check_translations(field, translations, values, problems, id)
 	if type(translations) ~= "table" then
-		problems[#problems + 1] = string.format("%s: '%s' must be a table of language -> string", id, field)
+		problems[#problems + 1] = string.format(
+			"%s: no '%s' text - the card will show its localization key", id, field)
 
 		return
 	end
@@ -169,7 +224,7 @@ end
 -- owner_name matters for the collision check: re-registering an id you already
 -- own is a RELOAD, which is normal and must succeed. Only another owner's id --
 -- or a shipped one -- is a collision.
-local function _validate(entry, prefix, owner_name, problems)
+local function _validate(entry, prefix, owner_name, problems, warnings)
 	if type(entry) ~= "table" then
 		problems[#problems + 1] = "entry is not a table"
 
@@ -223,13 +278,19 @@ local function _validate(entry, prefix, owner_name, problems)
 	-- Card data, needed only by buffs that are actually offered. A helper
 	-- template applied by another buff needs the template and the network id and
 	-- nothing else.
+	--
+	-- Text problems are WARNINGS. A card with no name is ugly, not broken: it
+	-- renders its localization key and works perfectly. Refusing to register it
+	-- would take a functioning gameplay card away from the player over a
+	-- cosmetic gap -- the same over-strictness that briefly turned off two of
+	-- this mod's own buffs. Reject only what would crash or do nothing.
 	if entry.pool then
 		if not entry.title_key then
-			_check_translations("title", entry.title, nil, problems, id)
+			_check_translations("title", entry.title, nil, warnings, id)
 		end
 
 		if not entry.description_key then
-			_check_translations("description", entry.description, entry.values, problems, id)
+			_check_translations("description", entry.description, entry.values, warnings, id)
 		end
 	end
 
@@ -250,7 +311,14 @@ end
 
 -- Checked after the factory has run, because these live on the built template
 -- rather than on the catalogue entry.
-local function _validate_template(id, template, problems)
+--
+-- Note the split: a problem stops the entry registering, a warning does not.
+-- The line between them is whether the buff would CRASH or be nonfunctional
+-- (reject) or merely behave differently from what the author probably intended
+-- (warn). Getting that wrong in the strict direction is its own silent failure
+-- -- an over-eager check here refused two of this mod's own working buffs and
+-- the only symptom was two cards that stopped being offered.
+local function _validate_template(id, template, problems, warnings)
 	if type(template) ~= "table" then
 		problems[#problems + 1] = string.format("%s: the 'template' factory did not return a table", id)
 
@@ -262,8 +330,14 @@ local function _validate_template(id, template, problems)
 	-- max_stacks_cap, and _check_max_stacks_cap returns "allowed" outright when
 	-- it is nil. Setting only the first gives an unbounded ramp that cheerfully
 	-- reports itself as 158/20 stacks, with nothing in the log.
-	if template.max_stacks and not template.max_stacks_cap then
-		problems[#problems + 1] = string.format("%s: has 'max_stacks' but no 'max_stacks_cap', so the ramp will never cap", id)
+	--
+	-- A warning rather than a rejection: it is only wrong for a template that
+	-- something actually adds repeatedly. A controller that sits at one stack is
+	-- perfectly correct without a cap.
+	if template.max_stacks and template.max_stacks > 1 and not template.max_stacks_cap then
+		warnings[#warnings + 1] = string.format(
+			"%s: has max_stacks=%d but no 'max_stacks_cap', so the ramp will never cap",
+			id, template.max_stacks)
 	end
 end
 
@@ -561,6 +635,55 @@ registry.has_prerequisites = function (buff_name)
 	return #all > 0 or (any ~= nil and #any > 0)
 end
 
+-- Cheap early-out for the per-frame unlock check: most installs have no gated
+-- buffs at all, and this saves walking players and pools for them.
+registry.has_any_prerequisites = function ()
+	for _, entry in ipairs(state.entries) do
+		if entry.pool and registry.has_prerequisites(entry.id) then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Every name that something else depends on. This is the set worth asking a
+-- player's buff extension about -- testing all of them is cheaper and steadier
+-- than enumerating everything a player is holding.
+registry.prerequisite_names = function ()
+	local names = {}
+
+	for _, entry in ipairs(state.entries) do
+		local all, any = _requirements(entry)
+
+		for _, id in ipairs(all) do
+			names[id] = true
+		end
+
+		for _, id in ipairs(any or {}) do
+			names[id] = true
+		end
+	end
+
+	return names
+end
+
+-- Pickable buffs held out of the initial pool because they are gated. The
+-- toggle view needs these: they are never in legendary_buffs.generic, so a view
+-- built only from that pool would never show an upgrade card and the player
+-- could not switch one off before it unlocked.
+registry.gated_pool_entries = function ()
+	local out = {}
+
+	for _, entry in ipairs(state.entries) do
+		if entry.pool and registry.has_prerequisites(entry.id) then
+			out[#out + 1] = entry
+		end
+	end
+
+	return out
+end
+
 -- Every registered buff whose prerequisites are not met, as a name -> true
 -- table ready to be merged into the exclusion list the pools are filtered
 -- through.
@@ -604,7 +727,7 @@ end
 -- factory covers everything else.
 local function _build_template(entry)
 	if entry.template then
-		return entry.template()
+		return entry.template(entry.context)
 	end
 
 	return {
@@ -676,8 +799,7 @@ end
 
 -- Does all five registrations for one entry. Called with the entry already
 -- validated.
-local function _register_one(entry, owner_name)
-	local template = _build_template(entry)
+local function _register_one(entry, owner_name, template)
 
 	-- Every template needs a `name` matching its key.
 	--
@@ -687,7 +809,7 @@ local function _register_one(entry, owner_name)
 	-- a table key for stack tracking, and a nil key crashes the moment the buff
 	-- is applied -- not when it is offered, so the card looks fine right up
 	-- until you pick it.
-	template.name = template.name or entry.id
+	template.name = entry.id
 
 	BuffTemplates[entry.id] = template
 
@@ -696,9 +818,13 @@ local function _register_one(entry, owner_name)
 	-- pool table by it and inserts into the result, so omitting it is a
 	-- nil-index crash at mission start.
 	if entry.pool then
-		local icon = entry.icon
+		-- icon_path is taken verbatim; icon is a short name resolved against the
+		-- shipped Mortis set unless it already looks like a path. Two fields
+		-- rather than one because a pack that keeps its full paths in a separate
+		-- field should not have them silently prefixed into nonsense.
+		local icon = entry.icon_path or entry.icon
 
-		if icon and not icon:find("/", 1, true) then
+		if icon and not entry.icon_path and not icon:find("/", 1, true) then
 			icon = ICON_ROOT .. icon
 		end
 
@@ -784,8 +910,12 @@ registry.register_buffs = function (addon_mod, entries, opts)
 		return 0, { "entries must be an array" }
 	end
 
-	local prefix = opts.prefix or (owner_name:lower() .. "_")
-	local category = opts.category or DEFAULT_CATEGORY
+	-- Explicit prefixes are the v1 contract for already shipped full IDs.
+	-- New callers get owner-scoped names by default, including helper templates
+	-- and derived localization keys. namespaced=true also opts legacy callers in.
+	local namespaced = opts.namespaced == true or opts.prefix == nil
+	local prefix = namespaced and _id_prefix(owner_name) or opts.prefix
+	local category = opts.category or (namespaced and registry.buff_id(owner_name, "category") or DEFAULT_CATEGORY)
 
 	registry.register_category(category, {
 		label = opts.category_label or owner_name,
@@ -795,15 +925,24 @@ registry.register_buffs = function (addon_mod, entries, opts)
 
 	local registered = 0
 	local problems = {}
+	local warnings = {}
 	local globals = {}
 
 	for i = 1, #entries do
 		local entry = entries[i]
+		if namespaced then entry = _prepare_entry(entry, owner_name) end
 		local entry_problems = {}
 
-		_validate(entry, prefix, owner_name, entry_problems)
+		-- `skip` lets a pack keep an entry in its catalogue without registering
+		-- it -- for something core already owns, or a card being held back.
+		-- Silent by design: it is a decision, not a fault.
+		local skipped = type(entry) == "table" and entry.skip
 
-		if #entry_problems == 0 then
+		if not skipped then
+			_validate(entry, prefix, owner_name, entry_problems, warnings)
+		end
+
+		if not skipped and #entry_problems == 0 then
 			entry.category = entry.category or category
 
 			if not registry.is_registered_category(entry.category) then
@@ -815,13 +954,12 @@ registry.register_buffs = function (addon_mod, entries, opts)
 			local ok, err = pcall(function ()
 				local template = _build_template(entry)
 
-				_validate_template(entry.id, template, entry_problems)
+				_validate_template(entry.id, template, entry_problems, warnings)
 
 				if #entry_problems == 0 then
-					-- Rebuilt rather than reused, so a factory that returns a
-					-- fresh table each call cannot be surprised by us holding
-					-- the validation copy.
-					_register_one(entry, owner_name)
+					-- Register the table we validated; factories may have state
+					-- and must not run twice for one registration.
+					_register_one(entry, owner_name, template)
 
 					for key, value in pairs(_card_strings(entry)) do
 						globals[key] = value
@@ -856,17 +994,35 @@ registry.register_buffs = function (addon_mod, entries, opts)
 		mod:add_global_localize_strings(globals)
 	end
 
-	for _, problem in ipairs(problems) do
-		-- Loud, because the quiet version is a card in the wild that crashes
-		-- when somebody picks it.
-		mod:error("[%s] %s", owner_name, problem)
+	-- Capped, then counted.
+	--
+	-- Loud is right for a rejected buff -- the quiet version is a card in the
+	-- wild that crashes when somebody picks it -- but "loud" stops meaning
+	-- anything at 140 lines. A pack of 190 entries with no card text produced
+	-- exactly that, and it buried everything else in the log it was competing
+	-- with. Enough lines to diagnose, then a number.
+	local function _report(list, level, verb)
+		local shown = math.min(#list, LOG_LINE_CAP)
+
+		for i = 1, shown do
+			level(mod, "[%s] %s", owner_name, list[i])
+		end
+
+		if #list > shown then
+			level(mod, "[%s] ... and %d more %s not listed (there are %d in total)",
+				owner_name, #list - shown, verb, #list)
+		end
 	end
 
-	mod:info("registered %d buff(s) from %s in category '%s'%s",
-		registered, owner_name, category,
-		#problems > 0 and string.format(" (%d rejected)", #problems) or "")
+	_report(problems, mod.error, "rejections")
+	_report(warnings, mod.warning, "warnings")
 
-	return registered, problems
+	mod:info("registered %d buff(s) from %s in category '%s'%s%s",
+		registered, owner_name, category,
+		#problems > 0 and string.format(" - %d REJECTED", #problems) or "",
+		#warnings > 0 and string.format(" - %d registered with a warning", #warnings) or "")
+
+	return registered, problems, warnings
 end
 
 -- ---------------------------------------------------------------------------

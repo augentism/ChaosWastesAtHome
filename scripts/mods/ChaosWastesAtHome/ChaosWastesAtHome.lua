@@ -611,11 +611,17 @@ mod.custom_buff_id_map = custom_buffs.network_id_map
 --
 -- Probe by feature, not by version: `type(cwah.register_buffs) == "function"`.
 -- The number below only distinguishes shapes that a feature test cannot.
-mod.ADDON_API_VERSION = 1
+mod.ADDON_API_VERSION = 2
 
 mod.register_buffs = registry.register_buffs
+mod.buff_id = registry.buff_id
 mod.register_buff_category = registry.register_category
 mod.subscribe = registry.subscribe
+
+-- The one buff name core owns that a pack might legitimately need to test for:
+-- the shield a player wears while their card is on screen. A card that reads
+-- "are they currently choosing" wants this rather than a hardcoded string.
+mod.CHOICE_SHIELD_BUFF = custom_buffs.CHOICE_SHIELD_BUFF
 
 -- Shared with this mod's own buffs, so an addon's procs show up in /cw_verify
 -- next to ours rather than in a report of their own.
@@ -908,15 +914,10 @@ mod:hook(GameModeCoopCompleteObjective, "_init_buff_system", function (func, sel
 		custom_buffs.apply_weight()
 		custom_buffs.reset_counters()
 
-		-- Host-only because the status cascade *applies* buffs to enemies,
-		-- which is a server act. On a client it would be writing to units it
-		-- does not own -- and its own owner check would make it a silent no-op
-		-- anyway, which is worse than not installing it.
-		--
-		-- Retried here because the load-time attempt declines at boot: the
-		-- engine module it hooks cannot be required until the game is further
-		-- along.
-		custom_buffs.install_hooks()
+		-- What used to be here: installing the status-cascade hooks. That lives
+		-- in the CwahBuffs pack now and installs itself off the "mission_start"
+		-- lifecycle event, which fires at the end of this function -- so a card
+		-- pack needs nothing from this file to get a per-mission callback.
 	end
 
 	_warn_about_conflicts()
@@ -1283,6 +1284,24 @@ mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_dat
 	-- the carried ones and additively, so the two cannot clobber each other.
 	local switched_off = buff_pool.apply_exclusions(exclude)
 
+	-- And every gated buff whose prerequisite is not already carried.
+	--
+	-- Registration keeps these out of legendary_buffs.generic to begin with, so
+	-- this is only about the ones a run has *already* unlocked: the pool is
+	-- rebuilt from scratch for each mission of a chain, and without this a card
+	-- unlocked in mission one would be offered from the top of mission two
+	-- whether or not its prerequisite survived the hop. custom_buffs'
+	-- update_unlocks puts them back in as their prerequisites land.
+	local owned = run.should_restore() and run.state().buffs or {}
+	local locked = 0
+
+	for name in pairs(registry.locked_names(owned)) do
+		if not exclude[name] then
+			exclude[name] = true
+			locked = locked + 1
+		end
+	end
+
 	-- And every custom buff, if any connected peer has not proved it computed
 	-- the same network ids we did.
 	--
@@ -1313,9 +1332,8 @@ mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_dat
 		buff_family_weights = {},
 	}
 
-	mod:debug_log("skipped the hordes backend request; using even family weights;",
-		carried, "buff(s) already owned this run and", switched_off,
-		"switched off in the toggle menu, and", suppressed, "suppressed for an unverified peer, excluded from the pools")
+	mod:debug_log("skipped the hordes backend request; using even family weights; excluded from the pools: %d already owned this run, %d switched off in the toggle menu, %d locked behind a prerequisite, %d suppressed for an unverified peer",
+		carried, switched_off, locked, suppressed)
 end)
 
 mod:hook_safe(GameModeCoopCompleteObjective, "_destroy_buff_system", function (self)
@@ -2930,6 +2948,7 @@ mod.update = function (dt)
 	-- previous frame's.
 	choice_shield.update(dt)
 	custom_buffs.update(dt)
+	custom_buffs.update_unlocks(dt, buff_pool.is_enabled)
 	_update_client_end_screen_picker(dt)
 	_update_chat_vote(dt)
 

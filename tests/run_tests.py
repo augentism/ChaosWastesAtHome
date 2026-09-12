@@ -18,6 +18,13 @@ Usage:
     python3 run_tests.py --offline    # offline only
     python3 run_tests.py --ingame     # in-game only
     python3 run_tests.py -k difficulty vote     # filter offline files
+    python3 run_tests.py --start      # launch the game, test, close it again
+
+--start makes an unattended run self-contained: it launches the game, waits for
+LuaExec and runs the tier. In-game runs close Darktide afterwards by default,
+including an already-running game and runs that fail or are interrupted with
+Ctrl+C. Use --keep-open to leave it running for inspection. Offline-only runs
+never close the game. --close remains accepted as an explicit default.
 
 The in-game tier reports SKIPPED rather than failed when the game is not
 running, so a closed game never turns the suite red.
@@ -31,6 +38,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 TESTS = Path(__file__).resolve().parent
@@ -78,8 +86,72 @@ def run_offline(filters):
     return result.returncode == 0
 
 
+CLI = WORKSPACE / ".agents/skills/darktide-dt-cli/scripts/dt-cli.sh"
+RESTART = WORKSPACE / ".agents/skills/darktide-dt-cli/scripts/restart-game.sh"
+
+
+def game_is_reachable():
+    """True when dt-cli can talk to a running game."""
+    if not CLI.exists():
+        return False
+
+    try:
+        result = subprocess.run(
+            [str(CLI), "exec", 'return "up"'],
+            capture_output=True, text=True, timeout=40, env=_env())
+    except subprocess.TimeoutExpired:
+        return False
+
+    return '"ok":true' in result.stdout
+
+
+def start_game():
+    """Launch the game and wait for LuaExec. Returns True if it came up."""
+    if not RESTART.exists():
+        print("could not start the game: %s is missing" % RESTART)
+        return False
+
+    print("starting Darktide for the in-game tier...", flush=True)
+    result = subprocess.run(["bash", str(RESTART)], env=_env())
+
+    return result.returncode == 0
+
+
+def stop_game():
+    """Close the game and wait for wine to let go of it.
+
+    Stops the systemd unit first, because that is how restart-game.sh launches
+    it -- pkill alone leaves the unit behind in a failed state, and the next
+    launch has to reset-failed before it can reuse the name. pkill is the
+    fallback for a game somebody started from Steam.
+    """
+    print("\nclosing Darktide...", flush=True)
+
+    subprocess.run(["systemctl", "--user", "stop", "darktide-test"],
+                   capture_output=True)
+
+    for pattern in (r"Darktide\.exe", r"Launcher\.exe"):
+        subprocess.run(["pkill", "-f", pattern], capture_output=True)
+
+    # Wine needs a moment to actually release the prefix. Returning before it
+    # has is how the next launch ends up with two wineservers and a pipe nobody
+    # owns -- the same wait restart-game.sh does for the same reason.
+    for _ in range(30):
+        still_running = subprocess.run(
+            ["pgrep", "-f", r"Darktide\.exe"], capture_output=True)
+
+        if still_running.returncode != 0:
+            return True
+
+        time.sleep(1)
+
+    print("  warning: Darktide is still running after 30s")
+
+    return False
+
+
 def run_ingame():
-    cli = WORKSPACE / ".claude/skills/darktide-dt-cli/scripts/dt-cli.sh"
+    cli = CLI
 
     if not cli.exists():
         print("ingame: SKIPPED - dt-cli not found at %s" % cli)
@@ -121,13 +193,44 @@ def main():
         "-k", nargs="*", default=[], metavar="NAME",
         help="substring filters for offline test files",
     )
+    parser.add_argument(
+        "--start", action="store_true",
+        help="launch the game first if it is not already up",
+    )
+    shutdown = parser.add_mutually_exclusive_group()
+    shutdown.add_argument(
+        "--close", action="store_true",
+        help="close the game after the in-game tier (the default)",
+    )
+    shutdown.add_argument(
+        "--keep-open", action="store_true",
+        help="leave the game running after in-game tests, including on failure",
+    )
     args = parser.parse_args()
 
     want_offline = args.offline or not args.ingame
     want_ingame = args.ingame or not args.offline
 
     offline = run_offline(args.k) if want_offline else None
-    ingame = run_ingame() if want_ingame else None
+
+    ingame = None
+    closed = None
+    if want_ingame:
+        try:
+            ready = True
+            if args.start:
+                if game_is_reachable():
+                    print("the game is already running", flush=True)
+                else:
+                    ready = start_game()
+                    if not ready:
+                        print("could not start the game; in-game tests failed", flush=True)
+            ingame = run_ingame() if ready else False
+        finally:
+            # A failed launch may still leave a process behind. Clean it up
+            # along with failures/exceptions from the tests themselves.
+            if not args.keep_open:
+                closed = stop_game()
 
     print()
     print("=" * 60)
@@ -141,12 +244,14 @@ def main():
         print("  offline  %s" % label(offline))
     if want_ingame:
         print("  ingame   %s" % label(ingame))
+        if closed is not None:
+            print("  shutdown %s" % label(closed))
 
     print("=" * 60)
 
     # A skipped tier is not a failure: the offline tier has to stay useful with
     # the game closed, which is most of the time.
-    failed = [v for v in (offline, ingame) if v is False]
+    failed = [v for v in (offline, ingame, closed) if v is False]
 
     return 1 if failed else 0
 

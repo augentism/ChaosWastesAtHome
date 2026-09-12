@@ -204,12 +204,17 @@ return {
 		a.eq(t.templates[name].class_name, "buff", "the existing template is untouched")
 	end) },
 
-	{ "max_stacks without max_stacks_cap is refused", sandboxed(function (a)
+	{ "a stacking template with no cap warns but still registers", sandboxed(function (a)
 		-- max_stacks is not the limit despite the name -- it only makes the buff
 		-- stackable at all. Setting it alone gives an unbounded ramp that
 		-- reports itself as 158/20 stacks with nothing in the log.
+		--
+		-- A warning and not a rejection, deliberately: it only matters for a
+		-- template something adds repeatedly, and refusing the entry outright
+		-- turned two of this mod's own working buffs off with no symptom beyond
+		-- two cards that stopped being offered.
 		local registry = load_registry()
-		local count, problems = register(registry, {
+		local count, problems, warnings = register(registry, {
 			entry("uncapped", {
 				stat_buffs = REMOVE,
 				template = function ()
@@ -218,20 +223,61 @@ return {
 			}),
 		})
 
-		a.eq(count, 0, "registered count")
-		a.gt(#problems, 0, "problem count")
+		a.eq(count, 1, "registered count")
+		a.count(problems, 0, "problems")
+		a.gt(#warnings, 0, "warning count")
 	end) },
 
-	{ "a translation that does not survive string.format is refused", sandboxed(function (a)
-		-- A lone %% in a loc string makes DMF's safe_string_format return NIL,
-		-- so the card title silently becomes nil with one log line per lookup.
+	{ "a one-stack controller needs no cap and warns about nothing", sandboxed(function (a)
+		-- The shape both ramp controllers in this mod use: max_stacks = 1, no
+		-- cap, nothing ever adding a second stack.
 		local registry = load_registry()
-		local count, problems = register(registry, {
-			entry("bad_format", { description = { en = "Increases damage by 15%." } }),
+		local count, problems, warnings = register(registry, {
+			entry("controller", {
+				stat_buffs = REMOVE,
+				template = function ()
+					return { class_name = "proc_buff", max_stacks = 1 }
+				end,
+			}),
 		})
 
-		a.eq(count, 0, "registered count")
-		a.gt(#problems, 0, "problem count")
+		a.eq(count, 1, "registered count")
+		a.count(problems, 0, "problems")
+		a.count(warnings, 0, "warnings")
+	end) },
+
+	{ "card text problems warn but never cost you the card", sandboxed(function (a)
+		-- Two separate faults, both cosmetic and both worth saying out loud: a
+		-- lone %% makes DMF's safe_string_format return NIL so the title
+		-- silently becomes nil, and a missing key renders the raw key.
+		--
+		-- Neither stops the buff working, so neither rejects it. Refusing a
+		-- functioning gameplay card over its wording is the same over-strictness
+		-- that briefly switched off two of this mod's own buffs -- and it turned
+		-- 70 cards of a third-party pack off in one go before this was fixed.
+		local registry = load_registry()
+
+		local count, problems, warnings = register(registry, {
+			entry("bad_format", { description = { en = "Increases damage by 15%." } }),
+			entry("no_text_at_all", { title = REMOVE, description = REMOVE }),
+		})
+
+		a.eq(count, 2, "registered count")
+		a.count(problems, 0, "problems")
+		a.gt(#warnings, 0, "warning count")
+	end) },
+
+	{ "an entry marked skip is left alone entirely", sandboxed(function (a, t)
+		-- How a pack keeps something in its catalogue that core already owns.
+		local registry = load_registry()
+		local count, problems = register(registry, {
+			entry("wanted"),
+			entry("not_wanted", { skip = true }),
+		})
+
+		a.eq(count, 1, "registered count")
+		a.count(problems, 0, "problems - skipping is a decision, not a fault")
+		a.nil_(t.templates[PREFIX .. "not_wanted"], "BuffTemplates entry")
 	end) },
 
 	{ "an entry with neither a template nor stat_buffs is refused", sandboxed(function (a)
@@ -359,6 +405,53 @@ return {
 		-- Already in the pool, so not new any more.
 		a.count(registry.newly_unlocked({ [PREFIX .. "root"] = true }, { [PREFIX .. "tier_one"] = true }), 0,
 			"newly unlocked when already pooled")
+	end) },
+
+	{ "has_any_prerequisites is false until something is gated", sandboxed(function (a)
+		-- The per-frame unlock check early-outs on this, so it is the entire
+		-- cost of the feature for an install with no upgrade cards.
+		local registry = load_registry()
+
+		register(registry, { entry("plain") })
+		a.falsy(registry.has_any_prerequisites(), "with only ungated buffs")
+
+		register(registry, { entry("gated", { unlock_after = PREFIX .. "plain" }) })
+		a.truthy(registry.has_any_prerequisites(), "once one is gated")
+	end) },
+
+	{ "prerequisite_names lists only what something depends on", sandboxed(function (a)
+		local registry = load_registry()
+
+		register(registry, {
+			entry("root"),
+			entry("unrelated"),
+			entry("child", { upgrade_of = PREFIX .. "root" }),
+		})
+
+		local names = registry.prerequisite_names()
+
+		a.truthy(names[PREFIX .. "root"], "the depended-on buff")
+		a.falsy(names[PREFIX .. "unrelated"], "a buff nothing depends on")
+		a.falsy(names[PREFIX .. "child"], "the dependent itself")
+	end) },
+
+	{ "gated entries are listed for the toggle view even though they are unpooled", sandboxed(function (a, t)
+		-- They are deliberately absent from legendary_buffs.generic, so a view
+		-- built from that pool alone would never show an upgrade card and the
+		-- player could not switch one off before it unlocked.
+		local registry = load_registry()
+
+		register(registry, {
+			entry("base_card"),
+			entry("upgrade_card", { unlock_after = PREFIX .. "base_card" }),
+		})
+
+		a.not_contains(t.generic, PREFIX .. "upgrade_card", "legendary generic pool")
+
+		local gated = registry.gated_pool_entries()
+
+		a.count(gated, 1, "gated pool entries")
+		a.eq(gated[1].id, PREFIX .. "upgrade_card", "the gated entry")
 	end) },
 
 	{ "a registered category is reported, an unregistered one is not", sandboxed(function (a)

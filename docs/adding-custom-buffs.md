@@ -20,7 +20,62 @@ You are not writing a buff system. You are adding rows to four tables.
 
 ---
 
-## In this mod: add one catalogue entry
+## Addon API: local names belong to the addon
+
+API version 2 namespaces new registrations automatically. Two addons can both
+declare `id = "damage"` and get different engine templates, network entries,
+card localization keys and saved IDs. Names depend on the owning DMF mod name,
+never registration order. Do not rename the owning mod after release.
+
+Call from `on_all_mods_loaded`:
+
+```lua
+local cwah = get_mod("ChaosWastesAtHome")
+assert(cwah.buff_id, "ChaosWastesAtHome addon API v2 is required")
+cwah.register_buffs(mod, {
+    { id = "damage", pool = true,
+      title = { en = "Damage" }, description = { en = "More damage." },
+      stat_buffs = { damage = 0.15 } },
+    { id = "helper", stat_buffs = { attack_speed = 0.05 } },
+    { id = "upgrade", pool = true, upgrade_of = "damage",
+      title = { en = "Damage upgrade" }, description = { en = "Adds a helper." },
+      template = function (context)
+          return {
+              class_name = "buff", max_stacks = 1, max_stacks_cap = 1,
+              start_func = function (_, template_context)
+                  template_context.buff_extension:add_internally_controlled_buff(
+                      context.resolve("helper"), template_context.buff:start_time())
+              end,
+          }
+      end },
+})
+```
+
+`upgrade_of`, `unlock_after`, `requires_all`, and `requires_any` refer to local
+IDs and are qualified automatically. A factory receives `context.id` (its
+engine name) and `context.resolve(local_id)` (another buff from the same addon).
+Use that resolver for helper names embedded in template fields or callbacks.
+The API cannot rewrite string literals captured inside arbitrary Lua functions.
+Factories run once per registration; the validated table is the registered table.
+
+Hooks and other code outside factories use `cwah.buff_id(mod, "damage")` to
+query or grant the buff. For another addon, pass its DMF mod name instead of
+`mod`. Never construct engine names yourself or assume a name already exists.
+Custom state stored on shared engine objects must also have an addon-specific
+field name; buff namespacing does not isolate arbitrary field writes.
+
+Use inline `title` and `description` translations for isolated card text.
+Explicit `title_key` / `description_key` still reference the global localization
+database, allowing intentional reuse of shipped text.
+
+**Compatibility with v1:** an explicit `opts.prefix` retains the old full-ID
+contract so existing packs and saves keep their names. Collisions in that legacy
+mode are still rejected rather than overwriting another author's buff. Omit
+`prefix` for new addons, or use `namespaced = true` to opt an existing caller
+into v2 naming (and update its helper/hook references). Default categories are
+also owner-specific; explicit category IDs intentionally share a category.
+
+## Legacy full-ID catalogues
 
 `custom_buffs.lua` drives everything from a single `CATALOGUE` list, so adding a
 buff means writing one entry and nothing else:
