@@ -273,8 +273,17 @@ end
 
 -- Faithfully re-executes, because the real one does: DMF caches nothing, and
 -- more than one bug in this mod has come from assuming otherwise.
+-- Installed mod paths stay flat; the original blessing pack lives inside the
+-- core repository in the source checkout.
+function harness.source_path(path)
+	if path:match("^CwahBuffs/") then
+		return ROOT .. "ChaosWastesAtHome/" .. path
+	end
+	return ROOT .. path
+end
+
 function mod:io_dofile(path)
-	local src = _read(ROOT .. path .. ".lua")
+	local src = _read(harness.source_path(path .. ".lua"))
 
 	if not src then
 		error("io_dofile: no such file: " .. tostring(path), 2)

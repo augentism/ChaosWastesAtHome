@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.3.0
+
+**Install CwahBuffs to keep the original nine custom blessings.** They now
+live in an optional pack instead of the core mod. The game's Mortis Trials
+buffs remain available without a pack. Everyone playing together should update
+the core mod and use matching buff packs.
+
+- **Choose your buff packs.** Install CwahBuffs, MourningBound, or both.
+  Each pack has its own Rollable Buffs category. CwahBuffs keeps the original
+  card IDs, so existing selections continue to refer to the same blessings.
+- **CwahBuffs and MourningBound can coexist.** MourningBound's identical copies
+  of Bulwark, Building Fury, Relentless, Flayer, Proliferation and Chain
+  Lightning, including their copied upgrade tiers, have been removed. Its
+  distinct damage, Contagion and Multishot variants remain separate cards,
+  marked “MourningBound”, with independent IDs and multishot state.
+- **Public buff API for addon authors.** Register cards, hidden helpers,
+  upgrade prerequisites, custom categories, diagnostic readings and run/mission
+  lifecycle callbacks through the core mod. API v2 gives new registrations
+  IDs scoped to their owning mod, so unrelated packs can reuse local names.
+  Template factories receive an ID resolver for helper references; explicit
+  legacy prefixes remain supported.
+- **Missing addon buffs are skipped when restoring a run**, instead of trying
+  to apply a template that is no longer installed.
+- **Twitch viewers can choose the next mission through VoxPopuli.** The
+  “Chat picks the mission” option hands the vote to viewers when the integration
+  is available. The end screen shows their tally, current leader and winner;
+  player votes are excluded while chat owns the round.
+- **Expanded automated coverage** for addon registration, ID collisions,
+  CwahBuffs multishot, card translations and ramp behavior. The in-game test
+  runner now closes the game on completion, including failure paths;
+  developers can use `--keep-open` to leave it running.
+
+Update both packs if using them together, then restart the game. When upgrading
+from the earlier MourningBound addon, start a fresh run and reselect its three
+renamed variants in Rollable Buffs; the former shared IDs cannot distinguish
+which pack's version was saved.
+
 ## 1.2.3
 
 - **Fixed this mod's screens drawing over the character-select screen instead

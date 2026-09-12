@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "1.2.3"
+mod.version = "1.3.0"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI

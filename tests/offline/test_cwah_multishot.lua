@@ -29,7 +29,7 @@ local function fixture()
 		},
 		Vector3 = { up = function () return 0 end },
 	}, { __index = _G })
-	local chunk = assert(loadfile(harness.ROOT .. "CwahBuffs/scripts/mods/CwahBuffs/multishot.lua"))
+	local chunk = assert(loadfile(harness.source_path("CwahBuffs/scripts/mods/CwahBuffs/multishot.lua")))
 	f.module = setfenv(chunk, f.env)()
 	f.action = { _player_unit = f.unit, _action_component = { shooting_rotation = 1 } }
 	return f

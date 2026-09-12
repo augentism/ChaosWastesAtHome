@@ -41,6 +41,9 @@ Optional:
 
 ### Optional buff packs
 
+The source for CwahBuffs is tracked in this repository's `CwahBuffs/` folder.
+Release zips install it separately as `mods/CwahBuffs/`.
+
 Install **CwahBuffs**, **MourningBound**, or both alongside ChaosWastesAtHome,
 and list each installed mod in `mod_load_order.txt`. The order of these three
 mods does not matter.
