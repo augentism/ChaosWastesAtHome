@@ -297,6 +297,16 @@ local widget_definitions = {
 		},
 	}, "detail_icon"),
 
+	-- Havoc UI icons are materials drawn directly, unlike buff-card icons
+	-- supplied as a parameter to the talent container above.
+	detail_modifier_icon = UIWidget.create_definition({
+		{
+			pass_type = "texture", value_id = "icon",
+			value = "content/ui/materials/icons/circumstances/havoc/havoc_mutator_nurgle",
+			style = { size = { ICON_SIZE, ICON_SIZE }, offset = { 0, 0, 2 } },
+		},
+	}, "detail_icon"),
+
 	detail_title = UIWidget.create_definition({
 		{
 			value_id = "text",
@@ -400,6 +410,18 @@ local widget_definitions = {
 		{ original_text = "" }
 	),
 }
+
+-- Secondary navigation fits between the title divider and list summary.
+for i, entry in ipairs({ { "subtab_buffs", "tab_rollable_buffs" }, { "subtab_havoc", "tab_havoc_modifiers" } }) do
+	local id, label = entry[1], entry[2]
+	scenegraph_definition[id] = {
+		parent = "screen", vertical_alignment = "top", horizontal_alignment = "left",
+		size = { 280, 36 }, position = { GROUP_X + (i - 1) * 290, 166, 3 },
+	}
+	widget_definitions[id] = UIWidget.create_definition(
+		table.clone(ButtonPassTemplates.default_button), id, { original_text = mod:localize(label) }
+	)
+end
 
 local legend_inputs = {
 	{

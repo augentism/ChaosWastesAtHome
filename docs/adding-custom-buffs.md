@@ -3,7 +3,10 @@
 How ChaosWastesAtHome adds its own buffs to the Mortis Trials buff pool, and
 every trap that cost a test cycle getting there.
 
-Working reference: `scripts/mods/ChaosWastesAtHome/custom_buffs.lua`.
+Working reference: `CwahBuffs/scripts/mods/CwahBuffs/catalogue.lua` in this
+repository. The reusable API lives in
+`scripts/mods/ChaosWastesAtHome/buff_registry.lua`.
+CwahBuffs is maintained here but installed as a separate mod.
 Line numbers refer to the decompiled source in
 `references/source/Darktide-Source-Code/`.
 
@@ -27,11 +30,36 @@ declare `id = "damage"` and get different engine templates, network entries,
 card localization keys and saved IDs. Names depend on the owning DMF mod name,
 never registration order. Do not rename the owning mod after release.
 
-Call from `on_all_mods_loaded`:
+Register from `on_all_mods_loaded`, resolving CWAH inside that callback. DMF
+fires it after every mod's main script has loaded, so your addon can appear
+before or after ChaosWastesAtHome in `mod_load_order.txt`. Load modules that
+access the CWAH API or install dependent hooks inside this callback too.
+This does not guarantee your hooks run last, or that other mods' own
+`on_all_mods_loaded` callbacks have finished.
+
+A complete entrypoint has this shape:
+
+```lua
+local mod = get_mod("MyBuffPack")
+
+mod.on_all_mods_loaded = function ()
+    if not mod:is_enabled() then return end
+    local cwah = get_mod("ChaosWastesAtHome")
+    if not cwah or type(cwah.buff_id) ~= "function"
+        or type(cwah.register_buffs) ~= "function" then
+        mod:error("ChaosWastesAtHome addon API v2 is required; update or install it.")
+        return
+    end
+    local pack = mod:io_dofile("MyBuffPack/scripts/mods/MyBuffPack/catalogue")
+    pack.register()
+end
+```
+
+Inside that catalogue's `pack.register` function, register entries like these:
 
 ```lua
 local cwah = get_mod("ChaosWastesAtHome")
-assert(cwah.buff_id, "ChaosWastesAtHome addon API v2 is required")
+assert(cwah and cwah.buff_id, "ChaosWastesAtHome addon API v2 is required")
 cwah.register_buffs(mod, {
     { id = "damage", pool = true,
       title = { en = "Damage" }, description = { en = "More damage." },
@@ -43,7 +71,8 @@ cwah.register_buffs(mod, {
           return {
               class_name = "buff", max_stacks = 1, max_stacks_cap = 1,
               start_func = function (_, template_context)
-                  template_context.buff_extension:add_internally_controlled_buff(
+                  local extension = ScriptUnit.extension(template_context.unit, "buff_system")
+                  extension:add_internally_controlled_buff(
                       context.resolve("helper"), template_context.buff:start_time())
               end,
           }
@@ -77,7 +106,7 @@ also owner-specific; explicit category IDs intentionally share a category.
 
 ## Legacy full-ID catalogues
 
-`custom_buffs.lua` drives everything from a single `CATALOGUE` list, so adding a
+CwahBuffs’ `catalogue.lua` drives its cards from a single `CATALOGUE` list, so adding a
 buff means writing one entry and nothing else:
 
 ```lua
@@ -90,7 +119,7 @@ _add({
 })
 ```
 
-plus its two strings in `ChaosWastesAtHome_localization.lua`:
+plus its two strings in `CwahBuffs/scripts/mods/CwahBuffs/CwahBuffs_localization.lua`:
 
 ```lua
 loc_cwah_custom_damage_title = { en = "Wrath Unbound" },
@@ -640,7 +669,7 @@ cold boot.
 
 ## Where the card text lives
 
-Titles and descriptions go in `ChaosWastesAtHome_localization.lua` under
+Titles and descriptions go in `CwahBuffs/scripts/mods/CwahBuffs/CwahBuffs_localization.lua` under
 `loc_<id>_title` / `loc_<id>_description`, not in the catalogue entry. Two
 things make that less obvious than it sounds.
 
@@ -667,7 +696,7 @@ you retune.
 **Double every literal per-cent in a value you substitute.** DMF `string.format`s
 the registered string again on its way out of the global lookup, so a lone `%`
 there is an invalid specifier — which fails the whole lookup and puts the raw key
-on the card. `_pct` in `custom_buffs.lua` returns `10%%` for exactly this reason.
+on the card. `_pct` in CwahBuffs’ `catalogue.lua` returns `10%%` for exactly this reason.
 
 **A reload will not update card text.** `add_global_localize_strings` refuses to
 overwrite a key it already holds, so editing a description needs a full restart

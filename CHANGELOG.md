@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.0
+
+- **New Buffs / Debuffs tab**, with Rollable Buffs selected by default and a
+  Havoc Modifiers subtab alongside it. Enable or disable individual random
+  Havoc modifiers, read their descriptions, or toggle the whole pool. Choices
+  travel with loadouts and affect future mission rolls. Disabling everything
+  removes random Havoc modifiers; environment and Fading Light still apply.
+- **Havoc rolls from the full available circumstance catalogue**, instead of
+  only Cranial Corruption, Pus-hardened Skin, the Moebian 21st and Blight Spreads.
+  Newer modifiers such as Rotten Armour, Contaminated Stimms, Heinous Rituals
+  and The Encroaching Garden can now appear. Circumstances referencing missing
+  mutators are excluded. Missions roll up to two distinct enabled circumstances;
+  enabling only one produces one, and disabling all produces none. Environment
+  chance and The Emperor's Fading Light are handled separately.
+- **Existing loadouts remain compatible.** Loading a preset saved before the
+  modifier selector was added enables all available Havoc modifiers, rather
+  than inheriting exclusions from the previously selected loadout. Changes do
+  not alter the current mission or cards that have already been rolled.
+- **Addon documentation updated** with load-order-independent initialization,
+  API v2 helper references and the CwahBuffs source location inside this repo.
+
 ## 1.3.0
 
 **Install CwahBuffs to keep the original nine custom blessings.** They now

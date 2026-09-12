@@ -144,6 +144,8 @@ local FILES = {
 	"test_buff_pool",
 	"test_run",
 	"test_difficulty",
+	"test_havoc_pool",
+	"test_buff_subtabs",
 	"test_net_vote",
 }
 

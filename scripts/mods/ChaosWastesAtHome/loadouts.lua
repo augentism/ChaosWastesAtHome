@@ -547,6 +547,9 @@ loadouts.snapshot = function ()
 
 	local out = {}
 
+	-- Always snapshot the new selector, even before its first edit/DMF flush.
+	out.disabled_havoc_circumstances = mod:get("disabled_havoc_circumstances") or {}
+
 	for key in pairs(mine) do
 		if not EXCLUDED[key] then
 			-- mod:get clones table settings, so the snapshot never aliases the
@@ -571,6 +574,12 @@ loadouts.apply = function (settings)
 	end
 
 	local applied = 0
+
+	-- Older loadouts predate this selector and mean the original all-on default,
+	-- not whatever exclusions the outgoing loadout happened to carry.
+	if settings.disabled_havoc_circumstances == nil then
+		mod:set("disabled_havoc_circumstances", {}, false)
+	end
 
 	for key, value in pairs(settings) do
 		if not EXCLUDED[key] then

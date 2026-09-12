@@ -11,6 +11,7 @@ local ViewElementInputLegend = require("scripts/ui/view_elements/view_element_in
 
 local asset_loader = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/asset_loader")
 local buff_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/buff_pool")
+local havoc_pool = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/havoc_pool")
 
 -- Which buffs are allowed to be rolled.
 --
@@ -32,6 +33,8 @@ BuffToggleView.init = function (self, settings_arg, context)
 	self._blueprints = self._blueprint_data.blueprints
 	self._view_settings = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buff_toggle_view_settings")
 
+	self._pool = buff_pool
+	self._subtab = "buffs"
 	self._group_widgets = {}
 	self._group_rows_by_id = {}
 	self._buff_widgets = {}
@@ -118,12 +121,28 @@ BuffToggleView.on_enter = function (self)
 	-- Rebuilt on open so custom buffs registered since the last visit appear.
 	buff_pool.invalidate()
 
-	self:_build_groups()
-
-	local groups = buff_pool.groups()
-
-	self:_select_group(groups[1])
+	widgets_by_name.subtab_buffs.content.hotspot.pressed_callback = callback(self, "cb_subtab_buffs")
+	widgets_by_name.subtab_havoc.content.hotspot.pressed_callback = callback(self, "cb_subtab_havoc")
+	self:_select_subtab("buffs")
 end
+
+-- Switch within this view, preserving the loadout strip and pause state.
+BuffToggleView._select_subtab = function (self, id)
+	self._subtab = id
+	self._pool = id == "havoc" and havoc_pool or buff_pool
+	for _, widget in ipairs(self._group_widgets) do self:_unregister_widget_name(widget.name) end
+	self._group_widgets, self._group_rows_by_id, self._group_grid = {}, {}, nil
+	local widgets = self._widgets_by_name
+	widgets.subtab_buffs.content.hotspot.disabled = id == "buffs"
+	widgets.subtab_havoc.content.hotspot.disabled = id == "havoc"
+	widgets.title_text.content.text = mod:localize(id == "havoc" and "tab_havoc_modifiers" or "buff_toggle_view_title")
+	widgets.family_pick_button.visible = id == "buffs"
+	self:_build_groups()
+	self:_select_group(self._pool.groups()[1])
+end
+
+BuffToggleView.cb_subtab_buffs = function (self) self:_select_subtab("buffs") end
+BuffToggleView.cb_subtab_havoc = function (self) self:_select_subtab("havoc") end
 
 -- ---------------------------------------------------------------------------
 -- Left list
@@ -133,7 +152,7 @@ BuffToggleView._build_groups = function (self)
 	local template = self._blueprints.group_row
 	local def = UIWidget.create_definition(template.pass_template, "group_grid_content_pivot", nil, template.size)
 
-	for i, group in ipairs(buff_pool.groups()) do
+	for i, group in ipairs(self._pool.groups()) do
 		local widget = self:_create_widget("group_row_" .. i, def)
 
 		template.init(self, widget, { title = group.label, group = group }, "cb_group_pressed")
@@ -167,14 +186,14 @@ end
 -- so which ones are excluded reads down the column instead of having to be
 -- discovered by selecting each one in turn.
 BuffToggleView._refresh_group_row = function (self, widget, group)
-	local on, total = buff_pool.group_counts(group)
+	local on, total = self._pool.group_counts(group)
 
 	widget.content.state_text = string.format("%d/%d", on, total)
 	widget.style.state_text.text_color = table.clone(
 		on == total and self._blueprint_data.color_on or self._blueprint_data.color_off
 	)
 
-	local excluded = group.family ~= nil and not buff_pool.is_family_offered(group.family)
+	local excluded = group.family ~= nil and not self._pool.is_family_offered(group.family)
 
 	widget.style.text.text_color = table.clone(
 		excluded and self._blueprint_data.color_off or self._blueprint_data.color_title
@@ -203,7 +222,7 @@ BuffToggleView._refresh_family_pick_button = function (self)
 		return
 	end
 
-	widget.content.original_text = buff_pool.is_family_offered(family)
+	widget.content.original_text = self._pool.is_family_offered(family)
 		and mod:localize("family_pick_disable")
 		or mod:localize("family_pick_enable")
 end
@@ -216,7 +235,7 @@ BuffToggleView.cb_toggle_family_pick = function (self)
 		return
 	end
 
-	buff_pool.set_family_offered(family, not buff_pool.is_family_offered(family))
+	self._pool.set_family_offered(family, not self._pool.is_family_offered(family))
 
 	self:_refresh_family_pick_button()
 	self:_refresh_group_counts()
@@ -250,7 +269,7 @@ BuffToggleView._build_buffs = function (self, group)
 	for i, name in ipairs(group.names) do
 		local widget = self:_create_widget("buff_row_" .. i, def)
 
-		template.init(self, widget, { title = buff_pool.title(name), buff_name = name }, "cb_buff_pressed")
+		template.init(self, widget, { title = self._pool.title(name), buff_name = name }, "cb_buff_pressed")
 		self:_refresh_buff_row(widget, name)
 
 		self._buff_widgets[#self._buff_widgets + 1] = widget
@@ -274,7 +293,7 @@ BuffToggleView._build_buffs = function (self, group)
 end
 
 BuffToggleView._refresh_buff_row = function (self, widget, name)
-	local enabled = buff_pool.is_enabled(name)
+	local enabled = self._pool.is_enabled(name)
 
 	widget.content.state_text = mod:localize(enabled and "buff_state_on" or "buff_state_off")
 	widget.style.state_text.text_color = table.clone(
@@ -318,6 +337,7 @@ BuffToggleView._select_group = function (self, group)
 	-- Here rather than in the click handler: on_enter selects the first group
 	-- directly, and the button would start out describing nothing.
 	self:_refresh_family_pick_button()
+	self:_refresh_details()
 end
 
 -- ---------------------------------------------------------------------------
@@ -368,10 +388,10 @@ end
 BuffToggleView._refresh_details = function (self)
 	local widgets_by_name = self._widgets_by_name
 	local name = self._selected_buff
-	local details = name and buff_pool.details(name)
+	local details = name and self._pool.details(name)
 	local visible = details ~= nil
 
-	for _, id in ipairs({ "detail_panel", "detail_icon", "detail_title", "detail_subtitle", "detail_description", "detail_toggle_button" }) do
+	for _, id in ipairs({ "detail_panel", "detail_icon", "detail_modifier_icon", "detail_title", "detail_subtitle", "detail_description", "detail_toggle_button" }) do
 		local widget = widgets_by_name[id]
 
 		if widget then
@@ -386,19 +406,28 @@ BuffToggleView._refresh_details = function (self)
 	widgets_by_name.detail_title.content.text = details.title
 
 	widgets_by_name.detail_subtitle.content.text = mod:localize(
-		details.is_family_buff and "buff_kind_family" or "buff_kind_legendary"
+		self._subtab == "havoc" and "havoc_modifier_kind"
+			or (details.is_family_buff and "buff_kind_family" or "buff_kind_legendary")
 	)
 
 	-- Already parsed and colour-tagged by the game's own formatter, so it goes
 	-- into the text pass verbatim.
 	widgets_by_name.detail_description.content.text = details.description or mod:localize("buff_no_description")
 
-	self:_set_icon(widgets_by_name.detail_icon, details.icon)
+	widgets_by_name.detail_icon.visible = self._subtab == "buffs"
+	widgets_by_name.detail_modifier_icon.visible = self._subtab == "havoc" and details.icon ~= nil
+	if self._subtab == "havoc" then
+		if details.icon then widgets_by_name.detail_modifier_icon.content.icon = details.icon end
+	else
+		self:_set_icon(widgets_by_name.detail_icon, details.icon)
+	end
 
-	local enabled = buff_pool.is_enabled(name)
+	local enabled = self._pool.is_enabled(name)
 
 	widgets_by_name.detail_toggle_button.content.original_text =
-		mod:localize(enabled and "buff_disable_this" or "buff_enable_this")
+		mod:localize(self._subtab == "havoc"
+			and (enabled and "havoc_disable_this" or "havoc_enable_this")
+			or (enabled and "buff_disable_this" or "buff_enable_this"))
 end
 
 BuffToggleView._refresh_summary = function (self)
@@ -408,7 +437,14 @@ BuffToggleView._refresh_summary = function (self)
 		return
 	end
 
-	local disabled = buff_pool.disabled_count()
+	local disabled = self._pool.disabled_count()
+
+	if self._subtab == "havoc" then
+		local enabled, total = self._pool.group_counts(self._pool.groups()[1])
+		widget.content.text = enabled == 0 and mod:localize("havoc_pool_none")
+			or mod:localize("havoc_pool_summary", enabled, total)
+		return
+	end
 
 	widget.content.text = disabled == 0 and mod:localize("buff_summary_all_on")
 		or mod:localize("buff_summary_disabled", disabled)
@@ -436,7 +472,7 @@ BuffToggleView.cb_toggle_selected = function (self)
 		return
 	end
 
-	buff_pool.set_enabled(name, not buff_pool.is_enabled(name))
+	self._pool.set_enabled(name, not self._pool.is_enabled(name))
 
 	self:_refresh_visible_buffs()
 	self:_refresh_group_counts()
@@ -459,21 +495,22 @@ BuffToggleView._set_group_enabled = function (self, enabled)
 		return
 	end
 
-	buff_pool.set_group_enabled(group, enabled)
+	self._pool.set_group_enabled(group, enabled)
 	self:_refresh_visible_buffs()
 	self:_refresh_group_counts()
 	self:_refresh_summary()
+	self:_refresh_details()
 end
 
 BuffToggleView.cb_reset_all = function (self)
-	for _, group in ipairs(buff_pool.groups()) do
-		buff_pool.set_group_enabled(group, true)
+	for _, group in ipairs(self._pool.groups()) do
+		self._pool.set_group_enabled(group, true)
 
 		-- Families too. "Re-enable everything" that leaves four families barred
 		-- from the opening pick has not re-enabled everything, and the state it
 		-- misses is the one that is hardest to spot.
 		if group.family then
-			buff_pool.set_family_offered(group.family, true)
+			self._pool.set_family_offered(group.family, true)
 		end
 	end
 
@@ -481,13 +518,14 @@ BuffToggleView.cb_reset_all = function (self)
 	self:_refresh_group_counts()
 	self:_refresh_summary()
 	self:_refresh_family_pick_button()
+	self:_refresh_details()
 end
 
 -- Every group row, not just the selected one: the same buff can appear in more
 -- than one group (grenade buffs are shared across abilities), so toggling once
 -- can change the count on a row that is not currently open.
 BuffToggleView._refresh_group_counts = function (self)
-	for _, group in ipairs(buff_pool.groups()) do
+	for _, group in ipairs(self._pool.groups()) do
 		local widget = self._group_rows_by_id[group.id]
 
 		if widget then
@@ -517,7 +555,7 @@ BuffToggleView.on_loadout_changed = function (self)
 	-- rather than leaving a stale reference behind.
 	local selected_id = self._selected_group and self._selected_group.id
 
-	for _, group in ipairs(buff_pool.groups()) do
+	for _, group in ipairs(self._pool.groups()) do
 		local widget = self._group_rows_by_id[group.id]
 
 		if widget then
@@ -532,6 +570,7 @@ BuffToggleView.on_loadout_changed = function (self)
 	self:_refresh_visible_buffs()
 	self:_refresh_summary()
 	self:_refresh_family_pick_button()
+	self:_refresh_details()
 end
 
 BuffToggleView.cb_on_back_pressed = function (self)

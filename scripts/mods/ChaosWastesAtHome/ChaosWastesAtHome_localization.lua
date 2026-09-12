@@ -46,6 +46,41 @@ return {
 		ru = "Случайные усиления",
 		["zh-cn"] = "随机增益",
 	},
+	tab_buffs_debuffs = {
+		en = "Buffs / Debuffs",
+		ru = "Усиления / Ослабления",
+		["zh-cn"] = "增益 / 减益",
+	},
+	tab_havoc_modifiers = {
+		en = "Havoc Modifiers",
+		ru = "Модификаторы Хаоса",
+		["zh-cn"] = "浩劫词缀",
+	},
+	havoc_modifier_kind = {
+		en = "Random Havoc modifier",
+		ru = "Случайный модификатор Хаоса",
+		["zh-cn"] = "随机浩劫词缀",
+	},
+	havoc_enable_this = {
+		en = "Enable this modifier",
+		ru = "Включить модификатор",
+		["zh-cn"] = "启用此词缀",
+	},
+	havoc_disable_this = {
+		en = "Disable this modifier",
+		ru = "Отключить модификатор",
+		["zh-cn"] = "禁用此词缀",
+	},
+	havoc_pool_summary = {
+		en = "%d / %d enabled. Changes apply to new mission rolls.",
+		ru = "Включено: %d / %d. Изменения действуют при новом выборе миссий.",
+		["zh-cn"] = "已启用 %d / %d。更改将在下次随机任务时生效。",
+	},
+	havoc_pool_none = {
+		en = "No random modifiers. Environment and Fading Light still apply.",
+		ru = "Без случайных модификаторов. Окружение и Угасающий свет остаются.",
+		["zh-cn"] = "无随机词缀。环境效果与帝皇的黯淡之光仍会生效。",
+	},
 	tab_collected = {
 		en = "Buffs Collected",
 		ru = "Собранные усиления",

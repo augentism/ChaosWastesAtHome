@@ -3,6 +3,8 @@ local mod = get_mod("ChaosWastesAtHome")
 local DangerSettings = require("scripts/settings/difficulty/danger_settings")
 local HavocSettings = require("scripts/settings/havoc_settings")
 local CircumstanceTemplates = require("scripts/settings/circumstance/circumstance_templates")
+local HavocCircumstances = require("scripts/settings/circumstance/templates/havoc_circumstance_template")
+local MutatorTemplates = require("scripts/settings/mutator/mutator_templates")
 local HavocModifierConfig = require("scripts/settings/havoc/havoc_modifier_config")
 local MissionTemplates = require("scripts/settings/mission/mission_templates")
 
@@ -17,6 +19,20 @@ local MissionTemplates = require("scripts/settings/mission/mission_templates")
 -- multiple of 5, so an arbitrary starting rank lands back on the ladder.
 
 local difficulty = {}
+
+difficulty.HAVOC_DISABLED_SETTING = "disabled_havoc_circumstances"
+
+difficulty.is_havoc_circumstance_enabled = function (id)
+	local disabled = mod:get(difficulty.HAVOC_DISABLED_SETTING)
+	return type(disabled) ~= "table" or not disabled[id]
+end
+
+difficulty.set_havoc_circumstances_enabled = function (ids, enabled)
+	local stored = mod:get(difficulty.HAVOC_DISABLED_SETTING)
+	local disabled = type(stored) == "table" and table.shallow_copy(stored) or {}
+	for _, id in ipairs(ids) do disabled[id] = not enabled or nil end
+	mod:set(difficulty.HAVOC_DISABLED_SETTING, disabled, true)
+end
 
 local HAVOC_ENTRY_RANK = 25
 local HAVOC_STEP = 5
@@ -264,6 +280,36 @@ local function _roll_distinct(pool, count)
 	return picked
 end
 
+-- HavocSettings.circumstances contains only the original four, even though
+-- the game ships newer Havoc circumstances in its dedicated template table.
+-- Use the complete catalogue, checking the live registry: obsolete templates
+-- sometimes survive after their mutators have been removed.
+difficulty.havoc_circumstance_pool = function ()
+	local candidates, excluded, pool = {}, {}, {}
+	excluded[FADING_LIGHT[1]], excluded[FADING_LIGHT[2]] = true, true
+	for _, variants in pairs(HavocSettings.circumstances_per_theme) do
+		for _, id in pairs(variants) do excluded[id] = true end
+	end
+	for id in pairs(HavocCircumstances) do candidates[id] = true end
+	for _, id in ipairs(HavocSettings.circumstances) do candidates[id] = true end
+	for id in pairs(candidates) do
+		local template = CircumstanceTemplates[id]
+		local valid = not excluded[id] and type(template) == "table"
+			and type(template.mutators) == "table" and #template.mutators > 0
+		if valid then
+			for _, mutator in ipairs(template.mutators) do
+				if not MutatorTemplates[mutator] then
+					valid = false
+					break
+				end
+			end
+		end
+		if valid then pool[#pool + 1] = id end
+	end
+	table.sort(pool)
+	return pool
+end
+
 -- Themes the game itself considers valid for a mission.
 --
 -- Vanilla picks the theme first and the mission from that theme's list
@@ -298,7 +344,11 @@ end
 difficulty.build_havoc_data = function (rank, mission_name)
 	local challenge, resistance = _havoc_challenge_resistance(rank)
 	local faction = HavocSettings.factions[math.random(#HavocSettings.factions)]
-	local circumstances = _roll_distinct(HavocSettings.circumstances, NUM_ROLLED_CIRCUMSTANCES)
+	local enabled = {}
+	for _, id in ipairs(difficulty.havoc_circumstance_pool()) do
+		if difficulty.is_havoc_circumstance_enabled(id) then enabled[#enabled + 1] = id end
+	end
+	local circumstances = _roll_distinct(enabled, NUM_ROLLED_CIRCUMSTANCES)
 
 	local tier = rank >= FADING_LIGHT_TIER_2_RANK and 2 or 1
 

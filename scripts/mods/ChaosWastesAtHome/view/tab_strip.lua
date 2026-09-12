@@ -36,7 +36,7 @@ local TABS = {
 	{
 		id = "buffs",
 		view = "chaos_wastes_buff_toggle_view",
-		label = "tab_rollable_buffs",
+		label = "tab_buffs_debuffs",
 	},
 	{
 		id = "settings",

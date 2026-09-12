@@ -64,6 +64,19 @@ use `cwah_mourningbound_*` IDs; reselect those variants in Rollable Buffs and
 start a fresh run when upgrading from the old pack. Old shared IDs cannot
 identify which pack's version was saved.
 
+### Choosing buffs and Havoc modifiers
+
+Open **Buffs / Debuffs**. **Rollable Buffs** is the default subtab and keeps
+all existing buff and family controls. **Havoc Modifiers** lists the available
+random Havoc circumstances: select one to read its description, then enable
+or disable it. Bulk controls apply to the selected subtab.
+
+These choices are saved with your loadout and affect newly rolled mission
+options, including rerolls. Havoc picks up to two distinct enabled modifiers;
+with one enabled it picks one, and with none enabled it adds none. Environment
+chance and The Emperor's Fading Light remain separate from these toggles.
+Already offered missions and the current mission keep their rolled modifiers.
+
 ### Starting a run
 
 1. Press your menu key — **at character select, or in the Mourningstar**. The
