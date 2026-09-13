@@ -164,8 +164,8 @@ end
 -- does not roll. It does save to persistent data like a real grant, so the buff
 -- carries into the next mission of a run and stops being offered again.
 --
--- Returns ok, reason -- the caller reports, this stays quiet.
-triggers.grant_named = function (buff_name)
+-- Returns ok, reason. Successful grants are also recorded in the console log.
+triggers.grant_named = function (buff_name, source)
 	if not buff_name or buff_name == "" then
 		return false, "no buff name given"
 	end
@@ -204,7 +204,7 @@ triggers.grant_named = function (buff_name)
 		return false, tostring(err)
 	end
 
-	mod:debug_log("granted '%s' by name", buff_name)
+	mod:info("reward granted: source=%s kind=named buff=%s", source or "named_api", buff_name)
 
 	return true
 end
@@ -216,7 +216,13 @@ end
 -- of what the player received and /cw_status reports it. The budget is measured
 -- against that total minus the ones that came free, so the run's own triggers
 -- still get their full allowance afterwards.
-triggers.grant_family = function (off_budget)
+local function _log_reward(source, kind, off_budget, detail)
+	mod:info("reward requested: source=%s kind=%s off_budget=%s family_total=%d legendary_total=%d detail=%s",
+		source or (off_budget and "starting_hand" or "direct_api"), kind,
+		tostring(not not off_budget), state.family_granted, state.legendary_granted, detail or "none")
+end
+
+triggers.grant_family = function (off_budget, source, detail)
 	if not mod.has_authority() then
 		return false
 	end
@@ -250,13 +256,13 @@ triggers.grant_family = function (off_budget)
 		state.starting_family_given = state.starting_family_given + 1
 	end
 
-	mod:debug_log("granted family buff (%d)", state.family_granted)
+	_log_reward(source, "family", off_budget, detail)
 
 	return true
 end
 
 -- off_budget as above: a starting pick, extra rather than an advance.
-triggers.grant_legendary = function (off_budget)
+triggers.grant_legendary = function (off_budget, source, detail)
 	if not mod.has_authority() then
 		return false
 	end
@@ -289,7 +295,7 @@ triggers.grant_legendary = function (off_budget)
 		state.starting_legendary_given = state.starting_legendary_given + 1
 	end
 
-	mod:debug_log("granted legendary choice (%d) using wave weighting %d", state.legendary_granted, wave_num)
+	_log_reward(source, "legendary_choice", off_budget, detail)
 
 	return true
 end
@@ -303,7 +309,7 @@ end
 -- Runs a source's roll and hands out whatever it is configured for. If that
 -- kind is already exhausted for the mission we fall back to the other one, so
 -- a trigger never silently does nothing while budget remains.
-triggers.fire = function (source)
+triggers.fire = function (source, detail)
 	if not mod.has_authority() then
 		return false
 	end
@@ -321,11 +327,14 @@ triggers.fire = function (source)
 	end
 
 	local granted
+	local context = string.format("configured=%s selected=%s chance=%s %s",
+		tostring(mod:get(source .. "_grant")), tostring(kind),
+		tostring(mod:get(source .. "_chance") or 100), detail or "")
 
 	if kind == "legendary" then
-		granted = triggers.grant_legendary() or triggers.grant_family()
+		granted = triggers.grant_legendary(false, source, context) or triggers.grant_family(false, source, context)
 	else
-		granted = triggers.grant_family() or triggers.grant_legendary()
+		granted = triggers.grant_family(false, source, context) or triggers.grant_legendary(false, source, context)
 	end
 
 	if not granted then
@@ -363,7 +372,7 @@ mod:hook(MissionObjectiveSystem, "end_mission_objective", function (func, self, 
 
 	if should_fire then
 		mod:debug_log("objective completed: %s", tostring(objective_name))
-		triggers.fire("objective")
+		triggers.fire("objective", string.format("objective=%s group=%s", tostring(objective_name), tostring(group_id)))
 	end
 end)
 
@@ -415,7 +424,7 @@ mod:hook_safe(MinionDeathManager, "set_dead", function (self, unit)
 	if threshold > 0 and state.kills >= threshold then
 		state.kills = 0
 
-		triggers.fire("kills")
+		triggers.fire("kills", string.format("mode=%s threshold=%s", tostring(mod:get("kills_mode")), tostring(threshold)))
 	end
 end)
 
@@ -455,6 +464,7 @@ local function _request_family_choice()
 	Managers.event:trigger("mission_buffs_event_request_family_buff_choice", 3)
 
 	state.family_requested = true
+	mod:info("reward requested: source=mission_start kind=family_choice")
 
 	mod:debug_log("requested opening buff family choice")
 end
@@ -564,7 +574,7 @@ triggers.update = function (dt)
 		if interval > 0 and state.time_accum >= interval then
 			state.time_accum = 0
 
-			triggers.fire("time")
+			triggers.fire("time", string.format("interval_seconds=%s", tostring(interval)))
 		end
 	end
 
@@ -582,7 +592,7 @@ triggers.update = function (dt)
 
 		if state.prev_terror_events > 0 and active == 0 then
 			mod:debug_log("terror event cleared")
-			triggers.fire("events")
+			triggers.fire("events", string.format("active_terror_events=%d->0", state.prev_terror_events))
 		end
 
 		state.prev_terror_events = active

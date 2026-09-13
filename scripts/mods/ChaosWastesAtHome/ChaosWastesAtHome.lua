@@ -3151,9 +3151,9 @@ mod:command("cw_buff", mod:localize("command_cw_buff"), function (kind)
 	local granted
 
 	if kind == "family" then
-		granted = triggers.grant_family()
+		granted = triggers.grant_family(false, "cw_buff_command")
 	else
-		granted = triggers.grant_legendary()
+		granted = triggers.grant_legendary(false, "cw_buff_command")
 	end
 
 	if not granted then
@@ -3204,7 +3204,7 @@ mod:command("cw_give", mod:localize("command_cw_give"), function (buff_name)
 	-- network id has to be guaranteed here rather than assumed from boot.
 	custom_buffs.ensure_network_id(buff_name)
 
-	local ok, reason = triggers.grant_named(buff_name)
+	local ok, reason = triggers.grant_named(buff_name, "cw_give_command")
 
 	-- Escaped: both the name and the failure reason reach here from outside,
 	-- and mod:echo re-formats its message -- a literal % in either would crash

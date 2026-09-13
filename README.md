@@ -289,7 +289,16 @@ nothing.
 
 ## Reporting a problem
 
-Turn on **Debug logging**, reproduce it, then send the console log from:
+Reward-source entries are recorded even with debug logging off. Search for
+`reward requested:` to see kills (including mode and threshold), objectives,
+timers, terror events, starting buffs, and manual card grants. Each entry names
+the reward kind; automatic sources also record the configured choice and chance,
+so a fallback to another reward kind is visible. A request records a buff or
+card offer being issued, not the player's eventual card selection. Named grants
+use `reward granted:`; mission carryover has separate restoration entries.
+
+For additional diagnostics, turn on **Debug logging**, reproduce it, then send
+the console log from:
 
 ```
 %APPDATA%\Fatshark\Darktide\console_logs\
