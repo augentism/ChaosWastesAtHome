@@ -2,16 +2,11 @@
 # The mission hop: a run moves the party straight from the end-of-round screen
 # into the next mission, without anybody passing through the Mourningstar.
 #
-# BOTH end-screen exits are exercised, separately, because they do not meet:
-#
-#   timer expiry     StateGameScore.update -> MechanismManager.trigger_event
-#                    "game_score_done"
-#   Continue / Space EndView._trigger_current_presentation_skip ->
-#                    MultiplayerSessionManager.leave "skip_end_of_round"
-#
-# The second never touches game_score_done. Testing only the timer is how you
-# ship a mod where letting the clock run works and pressing Space drops the
-# party -- which is exactly the shape of the bug a tester hit.
+# Realms deliberately removes the end-screen timer while its session is active,
+# so automation must send the Continue / Space signal after every mission:
+# EndView._trigger_current_presentation_skip -> MultiplayerSessionManager.leave
+# "skip_end_of_round". Exercise two consecutive exits so a one-shot transition
+# or carry-over implementation cannot pass on the first hop alone.
 #
 # This drives the game: it starts a run and forces wins. Do not fire it at a
 # session you care about.
@@ -198,9 +193,10 @@ exercise_exit() {
 	assert_contains "$buffs" "cwah_flayer" "$label: the granted buff carried across"
 }
 
-exercise_exit "timer expiry" ""
+exercise_exit "Continue / Space (hop 1)" \
+	'Managers.multiplayer_session:leave("skip_end_of_round") return "left"'
 
-exercise_exit "Continue / Space" \
+exercise_exit "Continue / Space (hop 2)" \
 	'Managers.multiplayer_session:leave("skip_end_of_round") return "left"'
 
 summary "hop"
