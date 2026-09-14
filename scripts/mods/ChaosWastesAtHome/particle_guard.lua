@@ -18,6 +18,8 @@ local particle_guard = {}
 -- after that the name is skipped outright, so a buff proccing every swing does
 -- not pay for a protected call it is guaranteed to fail.
 local failed_effects = {}
+-- A later mission can load an effect absent from the previous world.
+local failures_by_world = setmetatable({}, { __mode = "k" })
 
 particle_guard.install = function ()
 	local world_api = rawget(_G, "World")
@@ -36,7 +38,13 @@ particle_guard.install = function ()
 			return func(world, effect_name, ...)
 		end
 
-		if failed_effects[effect_name] then
+		local world_failures = failures_by_world[world]
+		if not world_failures then
+			world_failures = {}
+			failures_by_world[world] = world_failures
+		end
+
+		if world_failures[effect_name] then
 			return nil
 		end
 
@@ -47,6 +55,7 @@ particle_guard.install = function ()
 		end
 
 		failed_effects[effect_name] = true
+		world_failures[effect_name] = true
 
 		mod:info("particle effect not loaded, rendering nothing: %s", tostring(effect_name))
 
@@ -95,7 +104,8 @@ particle_guard.install = function ()
 
 			mod:hook(world_api, name, function (func, world, id, ...)
 				if id == nil and mod.manager then
-					return returns_false and false or nil
+					if returns_false then return false end
+					return nil
 				end
 
 				return func(world, id, ...)
