@@ -50,6 +50,8 @@ local solo = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/sol
 local loadouts = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/loadouts")
 local net = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/net")
 local choice_shield = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/choice_shield")
+local shrines = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/shrines")
+mod.shrines = shrines
 
 local SETTINGS_VIEW = "chaos_wastes_settings_view"
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
@@ -478,7 +480,11 @@ local MOVED_DEFAULTS = {
 	-- but the launcher.
 	launch_rung = "",
 	vote_tiebreak = "host",
-	objective_enabled = true,
+	objective_enabled = false,
+	shrines_enabled = true,
+	shrines_max = 6,
+	shrines_grant = "legendary",
+	shrines_chance = 100,
 	objective_side_missions = true,
 	kills_enabled = false,
 	time_enabled = false,
@@ -499,6 +505,11 @@ local MOVED_DEFAULTS = {
 }
 
 local function _apply_moved_defaults()
+	-- Existing installations keep their chosen sources; only fresh settings
+	-- start with shrines enabled. Old loadouts have the same compatibility rule.
+	if mod:get("shrines_enabled") == nil and mod:get("objective_enabled") ~= nil then
+		mod:set("shrines_enabled", false, false)
+	end
 	for id, value in pairs(MOVED_DEFAULTS) do
 		-- nil, not falsiness: a checkbox saved as false is a real choice.
 		if mod:get(id) == nil then
@@ -779,6 +790,8 @@ local function _session_role()
 
 	return nil
 end
+
+shrines.configure(run, triggers, _session_role)
 
 -- Returns a role string, or nil for "stay out of this mission".
 --
@@ -2936,6 +2949,7 @@ local function _reconcile_pause_hold()
 end
 
 mod.update = function (dt)
+	shrines.update(dt)
 	_update_pending_launch(dt)
 	_update_run(dt)
 	_update_pending_pool_init(dt)

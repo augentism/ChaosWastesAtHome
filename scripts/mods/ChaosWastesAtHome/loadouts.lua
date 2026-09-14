@@ -574,6 +574,10 @@ loadouts.apply = function (settings)
 	end
 
 	local applied = 0
+	local shrine_defaults = { shrines_enabled = false, shrines_max = 6, shrines_grant = "legendary", shrines_chance = 100 }
+	for key, value in pairs(shrine_defaults) do
+		if settings[key] == nil then mod:set(key, value, false) end
+	end
 
 	-- Older loadouts predate this selector and mean the original all-on default,
 	-- not whatever exclusions the outgoing loadout happened to carry.

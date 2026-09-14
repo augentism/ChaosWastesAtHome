@@ -85,9 +85,9 @@ Already offered missions and the current mission keep their rolled modifiers.
    and **three missions** rolled at that difficulty. Reroll if you like.
 2. Press **Begin the run**. The mission loads. On spawn you choose a **buff
    family**, the same three-card screen Mortis Trials uses.
-3. As you play you earn buffs. By default a completed objective grants a
-   legendary card pick; kills, a timer, and terror-event clears can also be
-   switched on as sources.
+3. As you play you earn buffs. By default, activate a shrine and defeat its
+   boss for a legendary card pick. Objectives, kills, a timer, and terror-event
+   clears can also be switched on as sources.
 4. Finish the mission and the end screen offers **three next missions**. Pick one
    and you go straight there with your buffs intact. The first card is
    pre-selected, so pressing continue keeps the run going. Playing with other
@@ -97,6 +97,32 @@ Already offered missions and the current mission keep their rolled modifiers.
    Fading Light, and scale their modifier loadout by rank exactly as real Havoc
    does.
 6. **Dying ends the run.** So does quitting to the Mourningstar.
+
+### Shrine rewards
+
+Shrines work across the difficulty ladder, including Auric and Havoc. Each
+activated shrine spawns supporting enemies and one designated boss. Killing
+that boss triggers one reward attempt for the party; leftover enemies do not
+hold it up. The shrine's attack-speed benefit applies only inside its area
+during the encounter and ends when the boss dies. It grants no permanent
+Atonement buff.
+
+In **Settings**, enable **Shrines**, choose family / legendary / random rewards
+and their chance, and set **Maximum shrines per map** from 1–20 (default 6).
+Actual counts depend on usable map locations. Enable/count changes apply to
+the next mission; reward type and chance are captured when you activate each
+shrine. Existing mission modifiers are retained.
+
+Shrines share the other sources' per-mission budgets and pool fallback. With
+the default three legendary choices, further shrine rewards can become family
+buffs; exhausted budgets stop further rewards. If you also enable kill or
+terror-event rewards, those sources can grant additional buffs independently.
+
+Fresh settings use shrines with 100% legendary rewards and objectives off.
+Existing settings and loadouts retain their choices; old loadouts without shrine
+settings load with shrines off. Enable the new source in your preferred loadout.
+Realms parties need the updated mod on every peer, with the host controlling
+shrine placement and rewards.
 
 ### Runs are opt-in
 
@@ -224,7 +250,7 @@ A few sit in the DMF mod options menu, marked below.
 | Custom buff frequency | 1 | How often the mod's own buffs come up, relative to the shipped categories |
 | Legendary card picks / Family buffs | 3 / 7 | Per mission, not per run — deep runs stack up fast |
 | Environment chance | 50% | Havoc only: hunting grounds / ventilation purge / toxic gas |
-| How buffs are earned | objective only | Objectives, kills, a timer and terror events can each be switched on as sources |
+| How buffs are earned | shrines only | Shrines, objectives, kills, a timer and terror events can each be switched on as sources; existing loadouts retain their settings |
 | When a vote ties | The host decides | Or *Whoever got there first*, or *Pick at random* |
 | Extra seconds on the end screen *(mod options)* | 30 | Solo end screens are very short by default. Also what gives chat room to answer the map vote |
 | Let chat pick the next mission *(mod options)* | on | With VoxPopuli connected, the viewers choose instead of the players. Off = you choose as usual. No effect without VoxPopuli |
@@ -290,7 +316,8 @@ nothing.
 ## Reporting a problem
 
 Reward-source entries are recorded even with debug logging off. Search for
-`reward requested:` to see kills (including mode and threshold), objectives,
+`reward requested:` to see shrines (including shrine ID and boss breed), kills
+(including mode and threshold), objectives,
 timers, terror events, starting buffs, and manual card grants. Each entry names
 the reward kind; automatic sources also record the configured choice and chance,
 so a fallback to another reward kind is visible. A request records a buff or

@@ -28,6 +28,12 @@ local function with_catalogue(check)
 			end,
 		}
 		local addon = setmetatable({}, { __index = harness.mod })
+		local modules = {}
+		function addon:io_dofile(path)
+			local result = harness.mod:io_dofile(path)
+			modules[path:match("([^/]+)$")] = result
+			return result
+		end
 		function addon:get_name() return "CwahBuffs" end
 		get_mod = function (name)
 			if name == "CwahBuffs" then return addon end
@@ -39,7 +45,7 @@ local function with_catalogue(check)
 			pack.register()
 			pack.register()
 			a.eq(calls, 1, "repeat registration is idempotent")
-			check(a, entries, counts)
+			check(a, entries, counts, modules)
 		end)
 		for key in pairs({ stat_buffs = true, buff_categories = true, proc_events = true, keywords = true }) do settings[key] = saved[key] end
 		profiles.default, get_mod, CLASS = old_default, old_get_mod, old_class
@@ -48,6 +54,60 @@ local function with_catalogue(check)
 end
 
 return {
+	{ "Flayer blocks direct recursion but allows the lightning callback during its burst", with_catalogue(function (a, entries, counts, modules)
+		local attack = require("scripts/utilities/attack/attack")
+		local impact = require("scripts/utilities/attack/impact_effect")
+		local profiles = require("scripts/settings/damage/damage_profile_templates")
+		local types = require("scripts/settings/damage/attack_settings").attack_types
+		local damage_types = require("scripts/settings/damage/damage_settings").damage_types
+		local old = { execute = attack.execute, play = impact.play, profile = profiles.psyker_smite_kill,
+			alive = HEALTH_ALIVE, unit = Unit, script = ScriptUnit, vector = Vector3, random = math.random }
+		local target, player = {}, {}
+		local pos = setmetatable({}, { __sub = function (x) return x end })
+		local calls, impacts = 0, 0
+		local ok, err = pcall(function ()
+			profiles.psyker_smite_kill = { name = "psyker_smite_kill", damage = {} }
+			HEALTH_ALIVE = { [target] = true }
+			Unit = { world_position = function () return pos end }
+			Vector3 = { normalize = function (x) return x end }
+			ScriptUnit = { has_extension = function (_, system)
+				if system == "buff_system" then return {
+					current_stacks = function () return 0 end,
+					has_buff_using_buff_template = function (_, id) return id == "cwah_flayer" end,
+				} end
+			end }
+			math.random = function () return 0 end
+			local flayer = entries.cwah_flayer.template()
+			local chain = entries.cwah_arc_chain.template()
+			impact.play = function () impacts = impacts + 1 end
+			attack.execute = function (unit, profile, ...)
+				calls = calls + 1
+				local args, params = { ... }, { attacked_unit = unit, damage_profile = profile }
+				for i = 1, select("#", ...), 2 do params[args[i]] = args[i + 1] end
+				a.neq(profile, profiles.psyker_smite_kill, "private profile")
+				a.eq(profile.name, "psyker_smite_kill", "stock lookup name")
+				a.eq(profile.damage, profiles.psyker_smite_kill.damage, "unchanged damage settings")
+				a.eq(params.attack_type, types.ranged); a.eq(params.damage_type, damage_types.smite)
+				a.eq(params.attacking_unit, player); a.eq(params.power_level, 500)
+				a.falsy(flayer.check_proc_func(params), "direct self-proc rejected")
+				a.truthy(chain.check_proc_func(params, { broadphase = {}, enemy_side_names = {},
+					window_start = 0, window_count = 0 }, {}, 0), "Flayer may trigger lightning")
+				if calls == 1 then modules.arc_chain.on_arc_hit(player, target, 0) end
+				return 10, "damaged", 1
+			end
+			flayer.proc_func({ attacked_unit = target }, {}, { unit = player })
+			a.eq(calls, 2, "arc callback can burst during another Flayer burst")
+			a.eq(impacts, 2); a.eq(counts.cwah_flayer, 2)
+			a.truthy(flayer.check_proc_func({ attack_type = types.ranged, damage_profile = profiles.psyker_smite_kill }), "normal Brain Burst remains eligible")
+			a.falsy(flayer.check_proc_func({ attack_type = types.buff }), "secondary bursts and DoTs remain excluded")
+			HEALTH_ALIVE[target] = nil
+			flayer.proc_func({ attacked_unit = target }, {}, { unit = player })
+			a.eq(calls, 2, "dead target cannot burst")
+		end)
+		attack.execute, impact.play, profiles.psyker_smite_kill = old.execute, old.play, old.profile
+		HEALTH_ALIVE, Unit, ScriptUnit, Vector3, math.random = old.alive, old.unit, old.script, old.vector, old.random
+		if not ok then error(err, 0) end
+	end) },
 	{ "original nine cards and three hidden helpers remain available", with_catalogue(function (a, entries)
 		a.size(entries, 12)
 		for _, id in ipairs({ "custom_damage", "custom_toughness_on_elite_kill", "crit_ramp", "attack_speed_ramp",

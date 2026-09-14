@@ -41,6 +41,7 @@ families. "Every buff we offer is a real buff" therefore means something.
 | `test_cwah_multishot.lua` | real CwahBuffs hooks: five-shot fans, aimed shot preservation, activation guards, recursion, error recovery, staff arrays and launch argument flow |
 | `test_cwah_catalogue.lua` | nine original cards and three helpers, idempotent registration, all card translations through both formatting passes, crit and attack-speed ramp contracts |
 | `test_havoc_pool.lua` | complete Havoc circumstance discovery, missing-mutator exclusion, every candidate reaching serialized mission data, distinct picks and separate environment/Fading Light rules; controlled mutator registry |
+| `test_shrines.lua` | additive mutators, host/guest setup, count limits, every reference encounter composition, boss-only rewards, duplicate deaths, spawn retries/despawns, overlapping encounters, temporary area buffs and deleted-level teardown |
 | `test_buff_subtabs.lua` | real view callbacks with UI stubs: default subtab, repeated switching without duplicate rows, isolated bulk toggles and refreshed details |
 | `test_run.lua` | run state, `trim_pools`, and `capture`'s merge-don't-overwrite rule |
 | `test_difficulty.lua` | the danger ladder, the Havoc ramp and its cap, `build_havoc_data`'s positional format |

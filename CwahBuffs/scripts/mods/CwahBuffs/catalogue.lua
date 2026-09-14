@@ -24,7 +24,7 @@ local cwah = get_mod("ChaosWastesAtHome")
 local BuffSettings = require("scripts/settings/buff/buff_settings")
 local BuffTemplates = require("scripts/settings/buff/buff_templates")
 local AttackSettings = require("scripts/settings/damage/attack_settings")
-local HordesBuffsUtilities = require("scripts/settings/buff/hordes_buffs/hordes_buffs_utilities")
+local flayer_burst = mod:io_dofile("CwahBuffs/scripts/mods/CwahBuffs/flayer_burst")
 -- NOT required here: see install_hooks. minion_buff_extension pulls in
 -- buff_extension_base, which reads the `Network` global at file scope, and that
 -- global does not exist yet while mods are loading at boot.
@@ -691,15 +691,9 @@ end
 -- ---------------------------------------------------------------------------
 --
 -- A flat chance on any hit to Brain Burst the target. Notable for how little
--- there is to it: HordesBuffsUtilities.trigger_brain_burst_on_target
--- (hordes_buffs_utilities.lua:289) already resolves the target's head hit zone
--- and actor, runs Attack.execute with the smite profile and plays the impact
--- effect. Worth grepping the hordes directory before writing an effect --
--- several of them are exported like this.
---
--- Also the example of letting proc_events do the dice. The number in
--- proc_events is a chance, rolled by ProcBuff before check_proc_func is reached
--- (proc_buff.lua:330), so a percentage buff needs no math.random of its own.
+-- there is to it, with a private damage profile so vanilla Brain Burst
+-- blessings accept the hit while Flayer can reject its own direct damage.
+-- ProcBuff rolls the configured chance before invoking the filter.
 
 local FLAYER_CHANCE = 0.1
 local FLAYER_BUFF = "cwah_flayer"
@@ -710,7 +704,7 @@ local function _flayer_burst(player_unit, target_unit)
 		return
 	end
 
-	HordesBuffsUtilities.trigger_brain_burst_on_target(target_unit, player_unit)
+	flayer_burst.trigger(target_unit, player_unit)
 
 	proc_counts.cwah_flayer = (proc_counts.cwah_flayer or 0) + 1
 end
@@ -730,29 +724,13 @@ _add({
 			proc_events = {
 				[proc_events.on_hit] = FLAYER_CHANCE,
 			},
-			-- The one remaining guard, and it became MORE important when this
-			-- stopped being crit-gated rather than less. It is load-bearing
-			-- twice over:
-			--
-			-- 1. Brain burst's own Attack.execute uses attack_types.buff, so
-			--    without this a burst would roll to cause another burst on the
-			--    same target, forever. The crit requirement used to make that
-			--    rare; a flat chance on every hit would make it routine. The
-			--    shipped hordes_buff_psyker_brain_burst_hits_nearby_enemies
-			--    carries the same clause for the same reason.
-			-- 2. It also rejects damage-over-time ticks -- burning, bleed, and
-			--    the arc chain's own electrocution, which ticks every 0.3-0.8s
-			--    per shocked enemy through the same attack type. Those are not
-			--    hits in any sense the player would recognise, and without this
-			--    a fight full of burning enemies would burst skulls on its own.
-			--
-			-- Arc damage is rejected here too, and NOT because it should not
-			-- burst -- it should. It is handled on arc_chain's direct callback
-			-- below instead, because the on_hit announcement it would otherwise
-			-- arrive on is the first thing to go missing in a busy fight. Both
-			-- paths firing would mean two rolls per arc.
+			-- Block only direct self-procs, buff/DoT damage, and the duplicate
+			-- on_hit roll for arcs (their explicit callback rolls once instead).
+			-- Flayer -> Chain Lightning -> Flayer is intentional; no global
+			-- re-entry flag blocks the arc callback while a burst is executing.
 			check_proc_func = function (params, template_data, template_context, t)
 				return params.attack_type ~= attack_types.buff
+					and not flayer_burst.is_own_damage(params.damage_profile)
 					and params.damage_profile ~= arc_chain.DAMAGE_PROFILE
 			end,
 			proc_func = function (params, template_data, template_context)

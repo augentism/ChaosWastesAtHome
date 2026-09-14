@@ -6,6 +6,13 @@ ChaosWastesAtHome. Extract the release into the game's `mods/` directory and
 add `CwahBuffs` to `mod_load_order.txt` alongside `ChaosWastesAtHome`.
 Restart the game after changing installed or enabled packs.
 
+Flayer's bursts count as ranged Brain Burst attacks, allowing compatible vanilla
+blessings such as Infectious Headache to trigger on their kills. Flayer cannot
+directly trigger itself. Flayer → Chain Lightning → Flayer is intentional and
+retains Chain Lightning's existing chance, target cooldown and spawn budget.
+Vanilla secondary bursts and damage-over-time ticks keep their original proc
+restrictions.
+
 ## Development
 
 Run these commands from the Darktide workspace root. The `--workspace` argument

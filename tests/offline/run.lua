@@ -145,6 +145,7 @@ local FILES = {
 	"test_run",
 	"test_difficulty",
 	"test_havoc_pool",
+	"test_shrines",
 	"test_buff_subtabs",
 	"test_net_vote",
 }

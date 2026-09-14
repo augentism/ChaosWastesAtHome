@@ -62,6 +62,13 @@ return {
 		a.falsy(difficulty.is_havoc_circumstance_enabled(id))
 		a.truthy(loadouts.apply({}))
 		a.truthy(difficulty.is_havoc_circumstance_enabled(id))
+		a.truthy(loadouts.apply({ shrines_enabled = true, shrines_max = 12, shrines_grant = "family", shrines_chance = 25 }))
+		a.eq(harness.mod:get("shrines_max"), 12)
+		a.truthy(loadouts.apply({}))
+		a.eq(harness.mod:get("shrines_enabled"), false)
+		a.eq(harness.mod:get("shrines_max"), 6)
+		a.eq(harness.mod:get("shrines_grant"), "legendary")
+		a.eq(harness.mod:get("shrines_chance"), 100)
 	end },
 	{ "Havoc pool includes every available non-environment circumstance", function (a)
 		local difficulty, _, _, definitions = fixture(a)

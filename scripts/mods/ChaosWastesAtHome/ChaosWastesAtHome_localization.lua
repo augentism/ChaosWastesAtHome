@@ -1,4 +1,12 @@
 return {
+	shrines_enabled = { en = "Grant from shrines" },
+	shrines_enabled_description = { en = "Add shrines to new crusade missions on every difficulty, including Havoc. Each shrine summons a boss and supporting enemies. Defeat its boss to earn a reward; remaining enemies do not delay it. Takes effect next mission." },
+	shrines_max = { en = "Maximum shrines per map" },
+	shrines_max_description = { en = "Upper limit for new missions, reduced when a map has fewer usable locations. Takes effect next mission." },
+	shrines_grant = { en = "Shrine reward" },
+	shrines_grant_description = { en = "What defeating a shrine boss grants. Uses the shared mission budgets and falls back to the other reward kind when the selected kind is exhausted. Saved when the shrine is activated." },
+	shrines_chance = { en = "Shrine reward chance (%%)" },
+	shrines_chance_description = { en = "Chance of a reward when the shrine boss dies. Rolls once per shrine using the setting at activation. The shrine's area benefit is temporary; no permanent Atonement buff is awarded." },
 	mod_name = {
 		en = "Chaos Wastes at Home",
 		ru = "Пустоши Хаоса у нас дома",

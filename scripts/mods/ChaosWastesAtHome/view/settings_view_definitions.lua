@@ -65,6 +65,11 @@ local LAYOUT = {
 	},
 	{
 		{ kind = "header", key = "settings_section_sources" },
+		{ kind = "check", id = "shrines_enabled" },
+		{ kind = "slider", id = "shrines_max", min = 1, max = 20, step = 1 },
+		{ kind = "cycle", id = "shrines_grant", values = { "family", "legendary", "random" },
+			labels = { "grant_family", "grant_legendary", "grant_random" } },
+		{ kind = "slider", id = "shrines_chance", min = 0, max = 100, step = 5, suffix = "%" },
 		{ kind = "check", id = "objective_enabled" },
 		{ kind = "check", id = "objective_side_missions" },
 		{ kind = "check", id = "kills_enabled" },

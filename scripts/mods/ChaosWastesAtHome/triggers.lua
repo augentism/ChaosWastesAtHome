@@ -309,18 +309,20 @@ end
 -- Runs a source's roll and hands out whatever it is configured for. If that
 -- kind is already exhausted for the mission we fall back to the other one, so
 -- a trigger never silently does nothing while budget remains.
-triggers.fire = function (source, detail)
+triggers.fire = function (source, detail, settings)
 	if not mod.has_authority() then
 		return false
 	end
 
-	if not _roll(mod:get(source .. "_chance")) then
+	local chance = settings and settings.chance or mod:get(source .. "_chance")
+	local configured = settings and settings.grant or mod:get(source .. "_grant")
+	if not _roll(chance) then
 		mod:debug_log("%s trigger rolled a miss", source)
 
 		return false
 	end
 
-	local kind = mod:get(source .. "_grant")
+	local kind = configured
 
 	if kind == "random" then
 		kind = math.random(1, 2) == 1 and "family" or "legendary"
@@ -328,8 +330,8 @@ triggers.fire = function (source, detail)
 
 	local granted
 	local context = string.format("configured=%s selected=%s chance=%s %s",
-		tostring(mod:get(source .. "_grant")), tostring(kind),
-		tostring(mod:get(source .. "_chance") or 100), detail or "")
+		tostring(configured), tostring(kind),
+		tostring(chance or 100), detail or "")
 
 	if kind == "legendary" then
 		granted = triggers.grant_legendary(false, source, context) or triggers.grant_family(false, source, context)
@@ -407,6 +409,9 @@ local function _kill_counts(unit)
 end
 
 mod:hook_safe(MinionDeathManager, "set_dead", function (self, unit)
+	-- One DMF hook owns death dispatch. Shrine rewards also work when the
+	-- independent kill-counter source is disabled.
+	if mod.shrines then mod.shrines.boss_died(unit) end
 	if not mod.has_authority() or not mod:get("kills_enabled") then
 		return
 	end
