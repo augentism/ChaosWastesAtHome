@@ -139,6 +139,7 @@ local FILES = {
 	"test_dreyko",
 	"test_pause_audio",
 	"test_particle_guard",
+	"test_spawn_guard",
 	"test_game_mode_shim",
 	"test_buff_registry",
 	"test_buff_pack_compat",
