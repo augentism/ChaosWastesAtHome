@@ -135,6 +135,7 @@ a.fail = fail
 -- instead of quietly not running -- which is the failure mode that makes a
 -- green suite worthless.
 local FILES = {
+	"test_shared_hooks",
 	"test_game_mode_shim",
 	"test_buff_registry",
 	"test_buff_pack_compat",
