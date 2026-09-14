@@ -700,7 +700,7 @@ local FLAYER_BUFF = "cwah_flayer"
 
 -- Shared by the two ways this buff can fire, so they cannot drift apart.
 local function _flayer_burst(player_unit, target_unit)
-	if not target_unit or not HEALTH_ALIVE[target_unit] then
+	if not flayer_burst.target_allowed(target_unit) then
 		return
 	end
 
@@ -732,6 +732,7 @@ _add({
 				return params.attack_type ~= attack_types.buff
 					and not flayer_burst.is_own_damage(params.damage_profile)
 					and params.damage_profile ~= arc_chain.DAMAGE_PROFILE
+					and flayer_burst.target_allowed(params.attacked_unit)
 			end,
 			proc_func = function (params, template_data, template_context)
 				_flayer_burst(template_context.unit, params.attacked_unit)

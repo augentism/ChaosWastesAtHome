@@ -12,6 +12,8 @@ directly trigger itself. Flayer → Chain Lightning → Flayer is intentional an
 retains Chain Lightning's existing chance, target cooldown and spawn budget.
 Vanilla secondary bursts and damage-over-time ticks keep their original proc
 restrictions.
+Poxbursters are excluded from Flayer, including arc-triggered bursts, so pushing
+one cannot accidentally trigger a Brain Burst (ported from songsintransmit).
 
 ## Development
 

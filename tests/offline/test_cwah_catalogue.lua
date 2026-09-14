@@ -98,8 +98,19 @@ return {
 			flayer.proc_func({ attacked_unit = target }, {}, { unit = player })
 			a.eq(calls, 2, "arc callback can burst during another Flayer burst")
 			a.eq(impacts, 2); a.eq(counts.cwah_flayer, 2)
-			a.truthy(flayer.check_proc_func({ attack_type = types.ranged, damage_profile = profiles.psyker_smite_kill }), "normal Brain Burst remains eligible")
+			a.truthy(flayer.check_proc_func({ attacked_unit = target, attack_type = types.ranged, damage_profile = profiles.psyker_smite_kill }), "normal Brain Burst remains eligible")
 			a.falsy(flayer.check_proc_func({ attack_type = types.buff }), "secondary bursts and DoTs remain excluded")
+			local previous_extension = ScriptUnit.has_extension
+			ScriptUnit.has_extension = function (unit, system)
+				if system == "unit_data_system" then return { breed = function () return { name = "chaos_poxwalker_bomber" } end } end
+				return previous_extension(unit, system)
+			end
+			a.falsy(flayer.check_proc_func({ attacked_unit = target, attack_type = types.ranged }), "Poxburster hit excluded")
+			flayer.proc_func({ attacked_unit = target }, {}, { unit = player })
+			modules.arc_chain.on_arc_hit(player, target, 0)
+			a.eq(calls, 2, "neither hit nor arc can burst a Poxburster")
+			a.eq(counts.cwah_flayer, 2, "excluded targets do not count as procs")
+			ScriptUnit.has_extension = previous_extension
 			HEALTH_ALIVE[target] = nil
 			flayer.proc_func({ attacked_unit = target }, {}, { unit = player })
 			a.eq(calls, 2, "dead target cannot burst")

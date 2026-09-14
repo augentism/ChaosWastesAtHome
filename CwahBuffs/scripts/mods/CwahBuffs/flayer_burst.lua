@@ -8,6 +8,14 @@ local ImpactEffect = require("scripts/utilities/attack/impact_effect")
 local burst = {}
 local profile
 
+-- Ported from songsintransmit's TEST7: pushing a Poxburster must not burst it.
+burst.target_allowed = function (target_unit)
+	if not target_unit or not HEALTH_ALIVE[target_unit] then return false end
+	local data = ScriptUnit.has_extension(target_unit, "unit_data_system")
+	local breed = data and data:breed()
+	return not breed or breed.name ~= "chaos_poxwalker_bomber"
+end
+
 burst.damage_profile = function ()
 	if not profile then
 		-- Private identity for the host's proc events. Preserve the stock name
@@ -25,7 +33,7 @@ end
 -- Only Flayer uses ranged classification; vanilla secondary bursts stay buff
 -- attacks, retaining Infectious Headache's recursion guard.
 burst.trigger = function (target_unit, player_unit)
-	if not target_unit or not HEALTH_ALIVE[target_unit] then return false end
+	if not burst.target_allowed(target_unit) then return false end
 	local player_pos = Unit.world_position(player_unit, 1)
 	local target_pos = Unit.world_position(target_unit, 1)
 	local unit_data = ScriptUnit.has_extension(target_unit, "unit_data_system")
