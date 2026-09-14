@@ -41,6 +41,9 @@ triggers.reset = function (first_mission)
 		legendary_granted = 0,
 		legendary_index = 0,
 		prev_terror_events = 0,
+		terror_event_names = {},
+		event_groups_attempted = {},
+		event_repeat_blocked = 0,
 		family_requested = false,
 		repump_accum = 0,
 		starting_legendary_given = 0,
@@ -314,6 +317,19 @@ triggers.fire = function (source, detail, settings)
 		return false
 	end
 
+	-- TEST7 extraction guard: spend the encounter's attempt before chance or
+	-- budget checks, so repeat waves and changed settings cannot farm rewards.
+	local group = source == "events" and state.event_reward_group
+	if group then
+		detail = group .. ":" .. (detail or "unnamed")
+		if state.event_groups_attempted[group] then
+			state.event_repeat_blocked = state.event_repeat_blocked + 1
+			mod:info("reward blocked: source=events reason=repeat_encounter group=%s", group)
+			return false
+		end
+		state.event_groups_attempted[group] = true
+	end
+
 	local chance = settings and settings.chance or mod:get(source .. "_chance")
 	local configured = settings and settings.grant or mod:get(source .. "_grant")
 	if not _roll(chance) then
@@ -442,6 +458,54 @@ end)
 -- watching the active count drop to zero is the only signal that catches a
 -- naturally finished event.
 -- ---------------------------------------------------------------------------
+
+local EXTRACTION_EVENT_GROUPS = {
+	event_habs_escape = "cm_habs_extraction",
+	event_habs_escape_stoppers = "cm_habs_extraction",
+	event_habs_escape_guard = "cm_habs_extraction",
+}
+
+local function _observe_terror_event(event_name)
+	if type(event_name) ~= "string" then return end
+	state.terror_event_names[event_name] = true
+	local group = EXTRACTION_EVENT_GROUPS[event_name]
+	if group and not state.event_reward_group then
+		state.event_reward_group = group
+		mod:info("encounter reward guard armed: group=%s event=%s", group, event_name)
+	end
+end
+
+-- Hook the class table shared by the engine, avoiding a second delayed hook
+-- namespace. Capture identity only; spawning, enemy AI and level flow remain
+-- entirely native. The extraction lock lives until triggers.reset next map.
+mod:hook_safe("TerrorEventManager", "_start_event", function (self, event_name)
+	if mod.manager and mod.has_authority() then _observe_terror_event(event_name) end
+end)
+
+triggers.poll_terror_events = function ()
+	local manager = Managers.state and Managers.state.terror_event
+	if manager ~= state.terror_manager then
+		state.terror_manager = manager
+		state.prev_terror_events = 0
+	end
+	if not manager then return end
+	local ok, active = pcall(manager.num_active_events, manager)
+	-- Missing managers and read errors are NOT completed encounters. Preserve
+	-- the previous valid sample so a transient failure cannot manufacture zero.
+	if not ok or type(active) ~= "number" or active < 0 or active ~= active then return end
+	for _, event in ipairs(manager._active_events or {}) do
+		_observe_terror_event(event.name)
+	end
+	if state.prev_terror_events > 0 and active == 0 then
+		local names = {}
+		for name in pairs(state.terror_event_names) do names[#names + 1] = name end
+		table.sort(names)
+		local context = #names > 0 and table.concat(names, ",") or "unnamed_or_trickle"
+		state.terror_event_names = {}
+		if mod:get("events_enabled") then triggers.fire("events", context) end
+	end
+	state.prev_terror_events = active
+end
 
 -- Opens the mission's family choice. Mortis does this from GameModeSurvival
 -- during wave-0 setup; a coop mission has no equivalent moment, so we do it
@@ -583,25 +647,8 @@ triggers.update = function (dt)
 		end
 	end
 
-	if mod:get("events_enabled") then
-		local terror_manager = Managers.state and Managers.state.terror_event
-		local active = 0
+	triggers.poll_terror_events()
 
-		if terror_manager then
-			local ok, num = pcall(terror_manager.num_active_events, terror_manager)
-
-			if ok and num then
-				active = num
-			end
-		end
-
-		if state.prev_terror_events > 0 and active == 0 then
-			mod:debug_log("terror event cleared")
-			triggers.fire("events", string.format("active_terror_events=%d->0", state.prev_terror_events))
-		end
-
-		state.prev_terror_events = active
-	end
 end
 
 return triggers
