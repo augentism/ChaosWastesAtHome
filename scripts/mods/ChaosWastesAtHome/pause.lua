@@ -10,6 +10,7 @@ local mod = get_mod("ChaosWastesAtHome")
 -- down, and still accepts clicks while the world is stopped.
 
 local pause = {}
+local audio = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/pause_audio")
 
 local TIMER = "gameplay"
 
@@ -162,6 +163,7 @@ pause.resume = function ()
 	end
 
 	state.saved_scale = nil
+	audio.finish()
 
 	mod:debug_log("gameplay resumed")
 end
@@ -237,6 +239,7 @@ pause.update = function (dt)
 	end
 
 	state.paused = true
+	audio.begin()
 
 	mod:debug_log("gameplay paused for buff choice")
 end

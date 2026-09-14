@@ -137,6 +137,7 @@ a.fail = fail
 local FILES = {
 	"test_shared_hooks",
 	"test_dreyko",
+	"test_pause_audio",
 	"test_game_mode_shim",
 	"test_buff_registry",
 	"test_buff_pack_compat",
