@@ -29,7 +29,8 @@
 set -uo pipefail
 
 WORKSPACE="${CWAH_TEST_ROOT:-/mnt/storage/workspace/modding/Darktide}"
-CLI="$WORKSPACE/.claude/skills/darktide-dt-cli/scripts/dt-cli.sh"
+CLI="$WORKSPACE/.agents/skills/darktide-dt-cli/scripts/dt-cli.sh"
+INSTANCE="${DARKTIDE_INSTANCE:-main}"
 
 PASS=0
 FAIL=0
@@ -75,7 +76,7 @@ sys.stdout.write("" if value is None else str(value))
 dt() {
 	local lua="$1" out attempt
 	for attempt in 1 2 3 4 5 6 7 8; do
-		out=$(timeout 60 "$CLI" exec --stdin <<<"$lua" 2>&1)
+		out=$(timeout -k 3s 25s bash "$CLI" --instance "$INSTANCE" exec --stdin <<<"$lua" 2>&1)
 		case "$out" in
 			*'"ok":true'*)
 				printf '%s' "$out" | _json_field output
@@ -96,7 +97,7 @@ dt() {
 }
 
 game_is_up() {
-	timeout 60 "$CLI" exec 'return "up"' 2>&1 | grep -q '"ok":true'
+	timeout -k 3s 25s bash "$CLI" --instance "$INSTANCE" exec 'return "up"' 2>&1 | grep -q '"ok":true'
 }
 
 # --- assertions ----------------------------------------------------------

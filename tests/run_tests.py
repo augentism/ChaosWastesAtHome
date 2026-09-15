@@ -14,11 +14,12 @@ Two tiers, because the failures come in two kinds.
             network registration.
 
 Usage:
-    python3 run_tests.py              # offline, then in-game if the game is up
+    python3 run_tests.py              # offline, then required two-client live tier
     python3 run_tests.py --offline    # offline only
     python3 run_tests.py --ingame     # in-game only
     python3 run_tests.py -k difficulty vote     # filter offline files
-    python3 run_tests.py --start      # launch the game, test, close it again
+    python3 run_tests.py --fresh      # restart both games, test, close both
+    python3 run_tests.py --single-client --ingame  # legacy host-only cases
 
 --start makes an unattended run self-contained: it launches the game, waits for
 LuaExec and runs the tier. In-game runs close Darktide afterwards by default,
@@ -26,8 +27,8 @@ including an already-running game and runs that fail or are interrupted with
 Ctrl+C. Use --keep-open to leave it running for inspection. Offline-only runs
 never close the game. --close remains accepted as an explicit default.
 
-The in-game tier reports SKIPPED rather than failed when the game is not
-running, so a closed game never turns the suite red.
+The default Realms tier fails if either game/mod is missing; offline-only
+tests remain usable with games closed. Legacy single-client cases may skip.
 
 NOTE: the in-game tests DRIVE the game. hop.sh starts a run and forces wins.
 Do not fire it at a session you care about.
@@ -60,7 +61,7 @@ WORKSPACE = TESTS.parent.parent
 # where the integration is developed and therefore the one where losing that
 # coverage would go unnoticed.
 INGAME = ["hop.sh", "buff_pool.sh", "custom_buffs.sh", "activation.sh",
-          "vox_map_vote.sh", "vox_map_vote_fallback.sh", "vox_map_vote_chat.sh"]
+          "vox_map_vote.sh", "vox_map_vote_fallback.sh"]
 
 SKIP_EXIT = 111
 
@@ -69,6 +70,7 @@ def _env():
     env = dict(os.environ)
     env["CWAH_TEST_ROOT"] = str(WORKSPACE)
     env["CWAH_TEST_DIR"] = str(TESTS)
+    env["DARKTIDE_INSTANCE"] = "main"
     return env
 
 
@@ -97,7 +99,7 @@ def game_is_reachable():
 
     try:
         result = subprocess.run(
-            [str(CLI), "exec", 'return "up"'],
+            ["bash", str(CLI), "--instance", "main", "exec", 'return "up"'],
             capture_output=True, text=True, timeout=40, env=_env())
     except subprocess.TimeoutExpired:
         return False
@@ -118,36 +120,10 @@ def start_game():
 
 
 def stop_game():
-    """Close the game and wait for wine to let go of it.
-
-    Stops the systemd unit first, because that is how restart-game.sh launches
-    it -- pkill alone leaves the unit behind in a failed state, and the next
-    launch has to reset-failed before it can reuse the name. pkill is the
-    fallback for a game somebody started from Steam.
-    """
-    print("\nclosing Darktide...", flush=True)
-
-    subprocess.run(["systemctl", "--user", "stop", "darktide-test"],
-                   capture_output=True)
-
-    for pattern in (r"Darktide\.exe", r"Launcher\.exe"):
-        subprocess.run(["pkill", "-f", pattern], capture_output=True)
-
-    # Wine needs a moment to actually release the prefix. Returning before it
-    # has is how the next launch ends up with two wineservers and a pipe nobody
-    # owns -- the same wait restart-game.sh does for the same reason.
-    for _ in range(30):
-        still_running = subprocess.run(
-            ["pgrep", "-f", r"Darktide\.exe"], capture_output=True)
-
-        if still_running.returncode != 0:
-            return True
-
-        time.sleep(1)
-
-    print("  warning: Darktide is still running after 30s")
-
-    return False
+    """Close only the main-profile game in the legacy single-client tier."""
+    sys.path.insert(0, str(WORKSPACE / "scripts"))
+    from realms_test_session import stop_games
+    return stop_games(("main",))
 
 
 def run_ingame():
@@ -189,6 +165,9 @@ def main():
     )
     parser.add_argument("--offline", action="store_true", help="offline tier only")
     parser.add_argument("--ingame", action="store_true", help="in-game tier only")
+    parser.add_argument("--single-client", action="store_true", help="Legacy main-only live tests instead of the default Realms peer tier")
+    parser.add_argument("--fresh", action="store_true", help="Restart both games for the Realms tier")
+    parser.add_argument("--live-chat", action="store_true", help="Explicitly allow legacy tests that use external chat services")
     parser.add_argument(
         "-k", nargs="*", default=[], metavar="NAME",
         help="substring filters for offline test files",
@@ -216,6 +195,19 @@ def main():
     ingame = None
     closed = None
     if want_ingame:
+        if not args.single_client:
+            cmd = [sys.executable, str(WORKSPACE / "scripts/test-realms.py"), "--suite", "cwah"]
+            for flag in ("start", "fresh", "keep_open"):
+                if getattr(args, flag):
+                    cmd.append("--" + flag.replace("_", "-"))
+            ingame = subprocess.run(cmd, env=_env()).returncode == 0
+            return 1 if offline is False or not ingame else 0
+        if args.fresh:
+            parser.error("--fresh is for the two-client tier")
+        if not args.live_chat:
+            INGAME[:] = [name for name in INGAME if not name.startswith("vox_")]
+        else:
+            INGAME.append("vox_map_vote_chat.sh")
         try:
             ready = True
             if args.start:

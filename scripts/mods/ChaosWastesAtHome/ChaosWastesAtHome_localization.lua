@@ -1,4 +1,34 @@
-return {
+local localization = {
+	recipe_reload_short = { en = "Reload file" },
+	recipe_field_id = { en = "Stable ID" },
+	recipe_field_name = { en = "Display name" },
+	recipe_field_amount = { en = "Strength / stack (%%)" },
+	recipe_field_max_stacks = { en = "Max stacks" },
+	recipe_field_duration = { en = "Duration (s)" },
+	recipe_field_chance = { en = "Chance (%%)" },
+	recipe_field_cooldown = { en = "Cooldown (s)" },
+	recipe_editor_new = { en = "New buff" },
+	recipe_editor_save = { en = "Save buff" },
+	recipe_editor_delete = { en = "Delete saved buff" },
+	recipe_editor_reload = { en = "Reload from disk" },
+	recipe_list_empty = { en = "No saved buffs yet.\nChoose New buff to begin." },
+	recipe_fields = { en = "Buff definition" },
+	recipe_live_preview = { en = "Live preview" },
+	recipe_confirm = { en = "Confirm" },
+	recipe_discard = { en = "Discard unsaved changes to this buff?" },
+	recipe_delete_confirm = { en = "Delete saved buff '%s'? The active session copy is unchanged." },
+	recipe_enabled = { en = "Included in your catalogue: Yes" },
+	recipe_disabled = { en = "Included in your catalogue: No" },
+	recipe_unsaved = { en = "Unsaved draft — Save to add these changes to your personal catalogue." },
+	recipe_saved = { en = "No unsaved changes. Buffs must still be acquired as reward cards." },
+	recipe_pending = { en = "This run's catalogue is locked. Saved changes apply next session; the host's active buffs are unchanged." },
+	recipe_personal = { en = "Editing your personal catalogue. Save refreshes the menu; joining a host still uses their buffs. Reload picks up external file edits." },
+	recipe_editor = { en = "Player Buff Editor" },
+	recipe_editor_enabled = { en = "Include in your catalogue" },
+	recipe_editor_legendary = { en = "Legendary card pick" },
+	-- Stock popup keys are also declared here for the static localization audit.
+	loc_popup_button_cancel = { en = "Cancel" },
+	loc_popup_button_close = { en = "Close" },
 	shrines_enabled = { en = "Grant from shrines" },
 	shrines_enabled_description = { en = "Add shrines to new crusade missions on every difficulty, including Havoc. Each shrine summons a boss and supporting enemies. Defeat its boss to earn a reward; remaining enemies do not delay it. Takes effect next mission." },
 	shrines_max = { en = "Maximum shrines per map" },
@@ -1008,3 +1038,8 @@ return {
 		["zh-cn"] = "确定删除？",
 	},
 }
+
+local mod = get_mod("ChaosWastesAtHome")
+local editor = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/recipe_editor_widgets")
+for key, value in pairs(editor.localizations()) do localization[key] = value end
+return localization

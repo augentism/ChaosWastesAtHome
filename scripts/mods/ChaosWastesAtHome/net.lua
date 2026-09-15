@@ -199,12 +199,12 @@ end
 -- Voting on the next mission
 -- ---------------------------------------------------------------------------
 --
--- Run entirely during gameplay, and it has to be: StateGameScore is a top-level
--- game state, not a gameplay sub-state (mechanism_settings.lua:77), so by the
--- time the end-of-round screen is up MissionCleanupUtilies has already called
--- game_session:disconnect() and Realms' bus is gone with it. There is no
--- channel at the end screen, none in the preparation lobby, and none in the
--- Mourningstar.
+-- This vote runs during gameplay and the host carries the winner into the
+-- transition. Do not assume transport survives the end screen: StateGameScore
+-- tears down gameplay. However, the installed Realms public mod-network API
+-- DOES support the preparation lobby through its session-control transport
+-- (measured 2026-09-15). The previous gameplay-only transport note was stale;
+-- see docs/player-buffs-network-investigation.md for the live recipe probe.
 --
 -- So the choice is made while the mission is still being played, and the host
 -- carries the winner into the end-of-mission transition.

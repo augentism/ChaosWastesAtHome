@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.5.0
+
+- Build player buffs from 40 triggers and 49 effects, with configurable strength,
+  stack cap, duration, proc chance and cooldown. Up to 64 saved definitions.
+- New shrine encounters: activate an altar, defeat its assigned boss, and roll
+  a configurable family/legendary/random reward. Shrine settings travel with
+  loadouts. Fresh installations default to shrines rather than objective rewards;
+  existing installations retain their reward-source settings.
+- Improved pause audio handling for looping weapon and minion sounds.
+- Hardened horde spawn visibility checks against stale player positions and
+  scoped missing-particle failures to their mission world.
+- Hab Dreyko extraction now gets one event-reward attempt, preventing repeated
+  extraction waves from farming rewards. Added reward-source diagnostics.
+- Rollable Buffs previews show stable IDs; the editor has wider dropdowns and
+  consistent navigation placement.
+- Expanded automated two-account coverage for recipe synchronization, editor
+  saving/reloading, mission carry-over and switching hosts without restarting.
+
+Realms players need matching CWaH versions and compatible buff packs. Join in
+the preparation lobby; the host's recipe catalogue stays fixed for the run,
+and clients keep their own saved recipe files.
+
+- Player Buff Editor now shares the Rollable Buffs/Havoc panel and tab geometry,
+  with scrollable selectable recipe rows and catalogue/reward-type checkboxes.
+  Recipes can be legendary picks or random regular family rewards; existing
+  recipes remain legendary unless changed.
+
+- Player-created timed stacking buffs from plain text definitions in
+  `ChaosWastesAtHome/buffs.txt` under the game's AppData directory. Choose an
+  event trigger, stat effect, strength, stack cap and duration; optional chance
+  and cooldown control how often stacks are gained. Successful triggers refresh
+  the shared timer even at the cap. Valid definitions become reward cards.
+- `/cw_recipes` reports the file location, loaded count and definition errors.
+  Definitions load at startup and can be reloaded without restarting.
+- In-game Player Buff Editor under Buffs / Debuffs: browse, create, edit, preview,
+  save, delete and reload personal recipes with validated controls. Safe saves
+  keep a previous-file backup and reject external-file conflicts. Menu previews
+  refresh immediately outside a run; launch captures a frozen catalogue for
+  the preparation lobby and every mission hop, leaving later edits for next run.
+- The builder uses a three-column Buffs subtab: personal recipes on the left,
+  editable fields in the middle, and a live validated preview on the right.
+  Replaces the Mod Options form and confirms before discarding unsaved edits.
+- Realms recipe synchronization: defer saved recipe registration, distribute
+  only the host's catalogue in the preparation lobby, verify the resulting IDs,
+  and block readiness/finalization until every peer acknowledges. Client files
+  are never overwritten. Saved buffs are visible before joining; 64 reserved
+  card/helper pairs allow different host catalogues without restarting, with
+  replacement gated on gameplay teardown and old pool/card metadata cleared;
+  in-progress recipe joins are rejected before engine admission. Recipe carrier
+  effects remain active on synchronized clients while triggers stay host-owned.
+
 ## 1.4.0
 
 - **New Buffs / Debuffs tab**, with Rollable Buffs selected by default and a

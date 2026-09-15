@@ -35,6 +35,7 @@ BuffToggleView.init = function (self, settings_arg, context)
 
 	self._pool = buff_pool
 	self._subtab = "buffs"
+	self._initial_subtab = context and context.subtab
 	self._group_widgets = {}
 	self._group_rows_by_id = {}
 	self._buff_widgets = {}
@@ -123,7 +124,11 @@ BuffToggleView.on_enter = function (self)
 
 	widgets_by_name.subtab_buffs.content.hotspot.pressed_callback = callback(self, "cb_subtab_buffs")
 	widgets_by_name.subtab_havoc.content.hotspot.pressed_callback = callback(self, "cb_subtab_havoc")
-	self:_select_subtab("buffs")
+	widgets_by_name.subtab_editor.content.hotspot.pressed_callback = function ()
+		Managers.ui:close_view(VIEW_NAME)
+		Managers.ui:open_view("chaos_wastes_recipe_view")
+	end
+	self:_select_subtab(self._initial_subtab == "havoc" and "havoc" or "buffs")
 end
 
 -- Switch within this view, preserving the loadout strip and pause state.
@@ -413,6 +418,10 @@ BuffToggleView._refresh_details = function (self)
 	-- Already parsed and colour-tagged by the game's own formatter, so it goes
 	-- into the text pass verbatim.
 	widgets_by_name.detail_description.content.text = details.description or mod:localize("buff_no_description")
+	if self._subtab == "buffs" then
+		widgets_by_name.detail_description.content.text = mod:localize("recipe_field_id") .. ": "
+			.. (details.stable_id or name) .. "\n\n" .. widgets_by_name.detail_description.content.text
+	end
 
 	widgets_by_name.detail_icon.visible = self._subtab == "buffs"
 	widgets_by_name.detail_modifier_icon.visible = self._subtab == "havoc" and details.icon ~= nil

@@ -117,11 +117,11 @@ local LOG_LINE_CAP = 8
 -- shipped buffs, so there is no second place for a key and a template to
 -- disagree.
 local function _title_key(entry)
-	return entry.title_key or ("loc_" .. entry.id .. "_title")
+	return entry.title_key or ("loc_" .. entry.id .. (entry.localization_suffix or "") .. "_title")
 end
 
 local function _description_key(entry)
-	return entry.description_key or ("loc_" .. entry.id .. "_description")
+	return entry.description_key or ("loc_" .. entry.id .. (entry.localization_suffix or "") .. "_description")
 end
 
 -- ---------------------------------------------------------------------------
@@ -542,7 +542,8 @@ end
 -- Comparing the assigned ids catches that; comparing a version string does not.
 --
 -- Returned as "name=id" strings rather than a hash so a mismatch names itself in
--- the log.
+-- the log. Player recipes append their canonical definition to the value:
+-- identical names and network IDs can still conceal different gameplay values.
 registry.network_id_map = function ()
 	local network_lookup = rawget(_G, "NetworkLookup")
 	local buff_lookup = network_lookup and network_lookup.buff_templates
@@ -554,7 +555,9 @@ registry.network_id_map = function ()
 	local entries = {}
 
 	for _, buff_name in ipairs(registry.all_template_names()) do
-		entries[#entries + 1] = string.format("%s=%s", buff_name, tostring(rawget(buff_lookup, buff_name)))
+		local signature = state.by_id[buff_name].definition_signature
+		entries[#entries + 1] = string.format("%s=%s%s", buff_name, tostring(rawget(buff_lookup, buff_name)),
+			signature and (":" .. signature) or "")
 	end
 
 	return entries
@@ -812,6 +815,16 @@ local function _register_one(entry, owner_name, template)
 	template.name = entry.id
 
 	BuffTemplates[entry.id] = template
+	-- Reusable recipe slots may become dormant. Remove their old card/pool
+	-- metadata without deleting or rebasing the permanent network lookup entry.
+	if (not entry.pool or (entry.user_recipe and entry.is_family_buff)) and state.by_id[entry.id] and state.by_id[entry.id].pool then
+		HordesBuffsData[entry.id] = nil
+		local generic = MissionBuffsAllowedBuffs.legendary_buffs.generic
+		for i = #generic, 1, -1 do
+			if generic[i] == entry.id then table.remove(generic, i) end
+		end
+		state.default_off[entry.id] = nil
+	end
 
 	-- Card data for the pickable ones only. filter_category is mandatory and
 	-- easy to forget by hand: init_legendary_buffs_pool_for_player indexes the
@@ -871,7 +884,7 @@ local function _register_one(entry, owner_name, template)
 	-- Pool membership. Gated buffs stay out until their prerequisite lands;
 	-- everything else joins the generic legendary pool, which is what makes it
 	-- rollable at all.
-	if entry.pool and not registry.has_prerequisites(entry.id) then
+	if entry.pool and not (entry.user_recipe and entry.is_family_buff) and not registry.has_prerequisites(entry.id) then
 		local generic = MissionBuffsAllowedBuffs.legendary_buffs.generic
 
 		for _, existing in ipairs(generic) do

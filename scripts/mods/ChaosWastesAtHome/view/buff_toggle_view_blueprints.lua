@@ -94,6 +94,7 @@ local function _row_passes(width, with_state)
 end
 
 local blueprints = {
+	recipe_row = { size = { GROUP_ROW_W, ROW_H }, pass_template = _row_passes(GROUP_ROW_W, false) },
 	-- Left list: one row per family / category.
 	group_row = {
 		size = { GROUP_ROW_W, ROW_H },

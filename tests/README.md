@@ -1,12 +1,12 @@
 # ChaosWastesAtHome tests
 
-Two tiers, because the failures come in two kinds. Nothing here ships:
+Offline logic plus a default two-client Realms tier. Nothing here ships:
 `.releaseinclude` is a whitelist of `.mod` + `scripts` + `README.md`, and
 `tests` is in the deploy script's `DEFAULT_IGNORES`.
 
 ```bash
-# everything: offline, then in-game if the game happens to be running
-nix develop ./nix --command python3 ChaosWastesAtHome/tests/run_tests.py
+# offline plus a fresh host/peer launch, join, mission, and carry-over test
+nix develop path:./nix --command python3 ChaosWastesAtHome/tests/run_tests.py --fresh
 
 # fast tier only, no game needed -- run this on every edit
 nix develop ./nix --command python3 ChaosWastesAtHome/tests/run_tests.py --offline
@@ -15,9 +15,34 @@ nix develop ./nix --command python3 ChaosWastesAtHome/tests/run_tests.py --offli
 nix develop ./nix --command python3 ChaosWastesAtHome/tests/run_tests.py -k difficulty vote
 ```
 
-A closed game reports **SKIPPED**, not failed.
+The default live tier requires **both** accounts and reports failure if either
+is missing. Recipe coverage requires `--start` with both games closed, or
+`--fresh` to close both games and launch
+again through their own Steam clients. Both Steam accounts must already be
+signed in and the test mods enabled in both load orders. No launcher clicks
+are needed. Offline-only runs still need no game.
 
-In-game runs **close Darktide when finished**, even if it was already running.
+See [shared Realms tests](../../scripts/REALMS-TESTS.md) for lifecycle,
+coverage, safety and the combined CWaH/Vox Populi entry point. The live peer
+tier checks matching buff IDs, host compatibility, both player spawns and
+buff replication/carry-over through a mission hop. It temporarily installs
+three different recipe definitions per account, verifies deferred registration,
+saved menu previews and host-only catalogue synchronization with fixed network
+slots. The three-column Buffs editor is checked for navigation, visible field refresh,
+live validation, dropdowns and unsaved-change confirmation. Editor actions save, reload, validate and delete against isolated scratch
+files on both accounts before joining, in the preparation lobby and in a mission, verifying
+that active templates, network IDs and the frozen run catalogue do not change.
+The suite then checks grants, native proc dispatch, stack caps, expiry and card
+carry-over. It swaps host roles to the other account and checks that different
+recipes, localized titles and effects replace the first catalogue without either
+game restarting or the network lookup changing. Original recipe
+files are restored even after failure; edits made during testing are preserved
+and reported with a recovery backup instead of overwritten. With `--keep-open`,
+the running games retain the fixture catalogue until teardown and reload.
+A guest's `_run.active`
+is not compared to the host's authoritative run flag.
+
+Peer in-game runs **close both games when finished**, even if already running.
 Cleanup also runs after test failures, exceptions, and Ctrl+C. Add `--keep-open`
 to leave the game running for inspection; `--close` is accepted but no longer
 required. Offline-only runs never close the game. A failed `--start` or failed
@@ -38,6 +63,7 @@ families. "Every buff we offer is a real buff" therefore means something.
 | `test_buff_pool.lua` | the catalogue, the enabled/disabled two-set invariant, exclusions, family offering |
 | `test_buff_pack_compat.lua` | independent addon startup alone/together, both load orders, disabled packs |
 | `test_buff_namespaces.lua` | colliding local IDs, helper callbacks, independent text, upgrade prerequisites and factory invocation |
+| `test_buff_recipes.lua` | text validation, all trigger/effect mappings against engine data, cooldown/gating, stat conversion, registration, recipe identity, bounded file reads and real engine stack cap/refresh/expiry methods |
 | `test_cwah_multishot.lua` | real CwahBuffs hooks: five-shot fans, aimed shot preservation, activation guards, recursion, error recovery, staff arrays and launch argument flow |
 | `test_cwah_catalogue.lua` | nine original cards and three helpers, idempotent registration, all card translations through both formatting passes, crit and attack-speed ramp contracts |
 | `test_havoc_pool.lua` | complete Havoc circumstance discovery, missing-mutator exclusion, every candidate reaching serialized mission data, distinct picks and separate environment/Fading Light rules; controlled mutator registry |
@@ -57,7 +83,15 @@ reach for at load.
 against stale data after a game patch. The in-game tier is the authority; this
 tier is the fast filter.
 
-## ingame/ — dt-cli, game must be running
+## ingame/ — legacy single-client cases
+
+These cases remain available with `--single-client` and explicitly target
+`main`; they do not count as peer coverage. Their cleanup stops only the
+main profile, never broad `pkill` matches. The default live path instead uses
+`scripts/test-realms.py --suite cwah` and its shared host/peer fixture.
+External Vox/chat integration cases require `--single-client --live-chat`,
+because they can use provider services and the chat round-trip posts a message.
+They are excluded from unattended peer smoke runs.
 
 **These drive the game.** `hop.sh` starts a run and forces wins. Do not fire it
 at a session you care about.
@@ -145,9 +179,10 @@ when this suite was written.
 
 ## Not covered
 
-- **Multiplayer.** Every in-game test drives one instance. A guest's picker
-  opening, tallies agreeing across machines, peers surviving the swap — all
-  still need two instances and two accounts, and stay manual.
+- **Full multiplayer behavior.** The peer tier covers joining, mission
+  transitions, compatibility and replicated buff carry-over. Guest picker
+  interactions, party vote tallies, late joins and every effect remain beyond
+  that smoke coverage; do not infer them from two successful process launches.
 - **`loadouts.list()`**, which shells out to `io.popen('dir ...')` against
   Windows `cmd.exe`.
 - **Engine buff effects.** Offline tests exercise selected CwahBuffs callbacks

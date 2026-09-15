@@ -101,6 +101,23 @@ local function register(registry, entries)
 end
 
 return {
+	{ "recipe slots switch between legendary and family without stale pool membership", sandboxed(function (a, t)
+		local registry = load_registry()
+		local name = PREFIX .. "reward_kind"
+		local function count()
+			local n = 0
+			for _, id in ipairs(t.generic) do if id == name then n = n + 1 end end
+			return n
+		end
+		register(registry, { entry("reward_kind", {user_recipe=true}) })
+		a.eq(count(), 1)
+		register(registry, { entry("reward_kind", {user_recipe=true, is_family_buff=true}) })
+		a.eq(count(), 0); a.truthy(t.hordes[name].is_family_buff)
+		register(registry, { entry("reward_kind", {user_recipe=true, pool=REMOVE}) })
+		a.eq(count(), 0); a.nil_(t.hordes[name])
+		register(registry, { entry("reward_kind", {user_recipe=true}) })
+		a.eq(count(), 1); a.falsy(t.hordes[name].is_family_buff)
+	end) },
 	{ "a valid entry gets all five registrations", sandboxed(function (a, t)
 		local registry = load_registry()
 		local count = register(registry, { entry("basic") })

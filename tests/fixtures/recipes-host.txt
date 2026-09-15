@@ -1,0 +1,23 @@
+[host_stride]
+name = Host Stride
+trigger = dodge
+effect = movement_speed
+amount = 2
+max_stacks = 3
+duration = 10
+
+[host_volley]
+name = Host Volley
+trigger = shoot
+effect = reload_speed
+amount = 3
+max_stacks = 4
+duration = 10
+
+[host_force]
+name = Host Force
+trigger = push
+effect = damage
+amount = 5
+max_stacks = 2
+duration = 10

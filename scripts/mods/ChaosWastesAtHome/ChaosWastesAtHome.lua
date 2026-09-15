@@ -1,6 +1,6 @@
 local mod = get_mod("ChaosWastesAtHome")
 
-mod.version = "1.4.0"
+mod.version = "1.5.0"
 
 -- Required rather than reached through CLASS: these are loaded lazily by the
 -- game (the game mode when a mission starts, the constant element by the UI
@@ -48,6 +48,10 @@ local registry = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome
 local escape = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/escape")
 local solo = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/solo")
 local loadouts = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/loadouts")
+local user_buffs = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/user_buffs")
+mod.user_buffs = user_buffs
+local recipe_editor = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/recipe_editor")
+local recipe_sync = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/recipe_sync")
 local net = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/net")
 local choice_shield = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/choice_shield")
 local shrines = mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/shrines")
@@ -56,6 +60,7 @@ mod.shrines = shrines
 local SETTINGS_VIEW = "chaos_wastes_settings_view"
 local RUN_SELECT_VIEW = "chaos_wastes_run_select_view"
 local BUFF_TOGGLE_VIEW = "chaos_wastes_buff_toggle_view"
+local RECIPE_VIEW = "chaos_wastes_recipe_view"
 local LAUNCH_VIEW = "chaos_wastes_launch_view"
 local BUFFS_VIEW = "chaos_wastes_buffs_view"
 
@@ -662,6 +667,9 @@ end
 -- two hooks at file scope -- io_dofile'ing it from outside re-runs those and
 -- fills the player's chat with "Attempting to rehook active hook".
 mod.grant_named_buff = function (buff_name)
+	if not user_buffs.can_grant(buff_name) then
+		return false, "player-created buffs require a singleplay CWaH run (disable Realms hosting)"
+	end
 	custom_buffs.ensure_network_id(buff_name)
 
 	return triggers.grant_named(buff_name)
@@ -1130,6 +1138,7 @@ mod:hook(MissionBuffsHandler, "save_buff_family_choice_for_player", function (fu
 end)
 
 mod:hook(MissionBuffsHandler, "set_buff_family_for_player", function (func, self, player, family_name, priority_family_buffs, family_buffs, from_choice)
+	if mod.has_authority() then family_buffs = user_buffs.family_pool(family_buffs) end
 	if not mod.has_authority() or not mod:get("ignore_buff_family") then
 		return func(self, player, family_name, priority_family_buffs, family_buffs, from_choice)
 	end
@@ -1296,6 +1305,7 @@ mod:hook(HordeMissionBuffsManager, "_fetch_backend_data_needed_before_player_dat
 	-- Buffs switched off in the toggle view join the same list. Applied after
 	-- the carried ones and additively, so the two cannot clobber each other.
 	local switched_off = buff_pool.apply_exclusions(exclude)
+	user_buffs.exclude(exclude)
 
 	-- And every gated buff whose prerequisite is not already carried.
 	--
@@ -1463,7 +1473,18 @@ end)
 
 mod.on_all_mods_loaded = function ()
 	solo.load_end_view_package()
+	user_buffs.load(loadouts, registry, buff_pool)
 end
+
+-- Cover card picks, starting rewards, restore and external addon grants too.
+mod:hook(MissionBuffsHandler, "give_buff_to_player", function (func, self, player, buff_name, ...)
+	if not user_buffs.can_grant(buff_name) then return end
+	return func(self, player, buff_name, ...)
+end)
+
+mod:command("cw_recipes", "Show player buff file, loaded count and parsing errors", function ()
+	user_buffs.report()
+end)
 
 -- Hooked by class NAME rather than by requiring the module, which is how
 -- Tertium4Or5 hooks this same class. DMF resolves the name when the class
@@ -1686,7 +1707,7 @@ mod:command("cw_launch", mod:localize("command_cw_launch"), _open_launcher)
 -- Defined here rather than beside the buffs view because it calls
 -- _open_launcher, and a local referenced before its declaration compiles to a
 -- global read -- silently nil at runtime.
-local OUR_VIEWS = { LAUNCH_VIEW, BUFF_TOGGLE_VIEW, SETTINGS_VIEW, BUFFS_VIEW }
+local OUR_VIEWS = { LAUNCH_VIEW, BUFF_TOGGLE_VIEW, SETTINGS_VIEW, BUFFS_VIEW, RECIPE_VIEW }
 
 local function _close_open_view()
 	local ui_manager = Managers.ui
@@ -1826,6 +1847,19 @@ mod:register_view({
 })
 
 mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/buff_toggle_view")
+mod:add_require_path("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/recipe_view")
+mod:register_view({
+	view_name = RECIPE_VIEW,
+	view_settings = {
+		init_view_function = function () return true end,
+		state_bound = true,
+		path = "ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/view/recipe_view",
+		class = "ChaosWastesRecipeView",
+		disable_game_world = false, load_always = true, load_in_hub = true, game_world_blur = 1.1,
+	},
+	view_transitions = {},
+	view_options = { close_all = false, close_previous = false },
+})
 mod:register_view({
 	view_name = BUFF_TOGGLE_VIEW,
 	view_settings = {
@@ -1858,6 +1892,7 @@ mod:register_view({
 -- re-enter this handler -- and the reset also makes the same entry pickable
 -- again, since the widget re-reads its displayed value from mod:get each frame.
 mod.on_setting_changed = function (setting_id)
+	if recipe_editor.changed(setting_id) then return end
 	-- Every change marks the active loadout dirty, not just the one below --
 	-- "any edits while one is selected save to that preset" means all of them.
 	_mark_loadout_dirty()
@@ -2949,6 +2984,8 @@ local function _reconcile_pause_hold()
 end
 
 mod.update = function (dt)
+	user_buffs.update()
+	recipe_sync.update(dt)
 	shrines.update(dt)
 	_update_pending_launch(dt)
 	_update_run(dt)

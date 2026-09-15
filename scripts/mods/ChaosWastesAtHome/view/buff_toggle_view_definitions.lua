@@ -37,11 +37,11 @@ local scenegraph_definition = {
 	},
 
 	title_text = {
-		vertical_alignment = "bottom",
-		parent = "title_divider",
+		vertical_alignment = "top",
+		parent = "screen",
 		horizontal_alignment = "left",
 		size = { 1200, 50 },
-		position = { 0, -35, 1 },
+		position = { GROUP_X, 28, 1 },
 	},
 
 	summary_text = {
@@ -412,7 +412,7 @@ local widget_definitions = {
 }
 
 -- Secondary navigation fits between the title divider and list summary.
-for i, entry in ipairs({ { "subtab_buffs", "tab_rollable_buffs" }, { "subtab_havoc", "tab_havoc_modifiers" } }) do
+for i, entry in ipairs({ { "subtab_buffs", "tab_rollable_buffs" }, { "subtab_havoc", "tab_havoc_modifiers" }, { "subtab_editor", "recipe_editor" } }) do
 	local id, label = entry[1], entry[2]
 	scenegraph_definition[id] = {
 		parent = "screen", vertical_alignment = "top", horizontal_alignment = "left",

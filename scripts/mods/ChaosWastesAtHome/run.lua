@@ -57,6 +57,9 @@ end
 
 run.mark_launched = function ()
 	state.launched = true
+	-- Snapshot before the preparation lobby opens. Saving recipes during this
+	-- run (including between missions) must not change its catalogue.
+	state.recipe_catalogue = mod._user_buffs and mod._user_buffs.local_text or ""
 
 	registry.notify("run_start")
 end
@@ -265,6 +268,7 @@ run.reset = function (reason)
 	end
 
 	state.launched = false
+	state.recipe_catalogue = nil
 	state.active = false
 	state.missions_completed = 0
 	state.family = nil
@@ -626,7 +630,7 @@ run.restore = function (dt)
 				if not registry.template_exists(buff_name) then
 					mod:warning("carried buff '%s' has no template any more - skipping it. An addon that added it is probably no longer installed.",
 						tostring(buff_name))
-				else
+				elseif not mod.user_buffs or mod.user_buffs.can_grant(buff_name) then
 					local missing = stacks - (held[buff_name] or 0)
 
 					for _ = 1, missing do

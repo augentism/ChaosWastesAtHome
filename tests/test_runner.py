@@ -17,7 +17,7 @@ spec.loader.exec_module(runner)
 class RunnerCleanupTests(unittest.TestCase):
     def invoke(self, args, *, result=True, error=None, start=True, closed=True):
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch("sys.argv", ["run_tests.py", *args]))
+            stack.enter_context(patch("sys.argv", ["run_tests.py", "--single-client", *args]))
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             offline = stack.enter_context(patch.object(runner, "run_offline", return_value=True))
             ingame = stack.enter_context(patch.object(
@@ -67,6 +67,22 @@ class RunnerCleanupTests(unittest.TestCase):
 
     def test_legacy_close_flag(self):
         self.assertEqual(self.invoke(["--ingame", "--close"]), (0, 1, 1, 0))
+
+    def test_default_live_tier_requires_peer_and_forwards_lifecycle(self):
+        from types import SimpleNamespace
+        with patch('sys.argv', ['run_tests.py', '--ingame', '--fresh', '--keep-open']), \
+                patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as run:
+            self.assertEqual(runner.main(), 0)
+        command = run.call_args.args[0]
+        self.assertIn('cwah', command)
+        self.assertIn('--fresh', command)
+        self.assertIn('--keep-open', command)
+
+    def test_peer_failure_is_not_a_skip(self):
+        from types import SimpleNamespace
+        with patch('sys.argv', ['run_tests.py', '--ingame']), \
+                patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=1)):
+            self.assertEqual(runner.main(), 1)
 
 
 if __name__ == "__main__":

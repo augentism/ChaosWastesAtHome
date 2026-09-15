@@ -64,6 +64,38 @@ use `cwah_mourningbound_*` IDs; reselect those variants in Rollable Buffs and
 start a fresh run when upgrading from the old pack. Old shared IDs cannot
 identify which pack's version was saved.
 
+### Player-created buffs
+
+Create your own timed stacking buffs under **Buffs / Debuffs → Player Buff Editor**,
+or edit
+`%APPDATA%/Fatshark/Darktide/ChaosWastesAtHome/buffs.txt`. The mod creates a
+commented example on first startup. `/cw_recipes` reports its path and any
+definition errors. Use **Reload file** after external edits; no restart is
+needed. Saves refresh the menu outside a run; during a run or preparation lobby,
+changes apply to the next session. Acquired recipes appear as normal
+reward cards in **Player Buffs**. Definitions are global and Rollable Buffs
+toggles remain part of each loadout.
+
+The editor uses a scrollable preset-style list with the same panel and tab
+positions as Rollable Buffs and Havoc Modifiers. **Include in your catalogue**
+enables the saved definition. **Legendary card pick** selects its reward pool:
+checked means a legendary pick (the default for existing recipes); unchecked
+means a randomly rolled regular family buff, available with any chosen family.
+Player Buffs remains a menu category, not a starting family.
+
+Each definition selects a trigger, a stat effect, strength per stack, maximum
+stacks and duration. A successful trigger adds one stack and refreshes the
+shared timer, even at the cap. See [the format and complete component list](docs/player-buffs.md).
+
+Realms parties use the **host's recipes**. With Realms installed, saved recipes
+appear in the Player Buffs menu at startup; the host's catalogue is synchronized
+in the preparation lobby before ready-up. Clients keep their own saved files,
+but those recipes are not registered for the host's run. Everyone needs matching
+CWaH code and compatible base buff packs. Reserved network slots allow switching
+to a host with different recipes without restarting, after the previous session
+has fully torn down. Join through the preparation lobby,
+not an in-progress recipe run. `/cw_recipes` reports synchronization status.
+
 ### Choosing buffs and Havoc modifiers
 
 Open **Buffs / Debuffs**. **Rollable Buffs** is the default subtab and keeps

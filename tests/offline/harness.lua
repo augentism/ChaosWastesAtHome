@@ -406,6 +406,10 @@ harness.reset = function ()
 	-- test's categories and default-off buffs are visible to the next.
 	mod._buff_registry_state = nil
 	mod._custom_buff_procs = nil
+	mod._user_buffs = nil
+	mod.user_buffs = nil
+	mod.recipe_sync = nil
+	mod._recipe_sync = nil
 
 	for k in pairs(harness.global_localization) do
 		harness.global_localization[k] = nil

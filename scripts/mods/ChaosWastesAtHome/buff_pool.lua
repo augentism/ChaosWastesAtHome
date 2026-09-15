@@ -34,6 +34,16 @@ local GROUP_LEGENDARY = "legendary_generic"
 
 local catalogue = nil
 
+local function recipe_menu()
+	return mod.user_buffs and mod.user_buffs.menu_entries and mod.user_buffs.menu_entries() or {}
+end
+
+local function recipe_details(name)
+	for _, entry in ipairs(recipe_menu()) do
+		if entry.name == name then return entry end
+	end
+end
+
 -- ---------------------------------------------------------------------------
 -- Catalogue
 -- ---------------------------------------------------------------------------
@@ -146,8 +156,12 @@ local function _build_catalogue()
 
 	for _, name in ipairs(legendary.generic or {}) do
 		local category = _registered_category(name)
-
-		_add(category and _category_group(category) or generic_group, name)
+		if category ~= "cwah_player_buffs" or not (mod._user_buffs and mod._user_buffs.deferred) then
+			_add(category and _category_group(category) or generic_group, name)
+		end
+	end
+	for _, entry in ipairs(recipe_menu()) do
+		_add(_category_group("cwah_player_buffs"), entry.name)
 	end
 
 	-- Gated buffs are deliberately NOT in legendary_buffs.generic -- that is how
@@ -212,6 +226,8 @@ local function _build_catalogue()
 end
 
 buff_pool.display_name = function (name)
+	local recipe = recipe_details(name)
+	if recipe then return recipe.title end
 	local data = HordesBuffsData[name]
 	local key = data and data.title
 
@@ -254,6 +270,16 @@ end
 -- Everything the detail card needs. Nil when the buff has no data entry at all,
 -- which is the caller's cue to show nothing rather than an empty card.
 buff_pool.details = function (name)
+	local recipe = recipe_details(name)
+	if recipe then
+		local details = table.clone(recipe)
+		-- Preferences retain the authored ID even when a host's recipe uses a
+		-- reusable network slot. Read that identity, not the local saved file.
+		local prefix = registry.buff_id(mod, "recipe_")
+		local preference = recipe.preference or name
+		details.stable_id = preference:sub(1, #prefix) == prefix and preference:sub(#prefix + 1) or preference
+		return details
+	end
 	local data = HordesBuffsData[name]
 
 	if not data then
@@ -272,6 +298,7 @@ buff_pool.details = function (name)
 
 	return {
 		title = buff_pool.display_name(name),
+		stable_id = name,
 		description = description,
 		icon = data.icon,
 		is_family_buff = data.is_family_buff and true or false,
@@ -329,6 +356,8 @@ end
 -- Explicit choice wins in both directions; the catalogue default only decides
 -- for names the player has never touched.
 buff_pool.is_enabled = function (name)
+	local recipe = recipe_details(name)
+	name = recipe and recipe.preference or name
 	if _disabled_table()[name] then
 		return false
 	end
@@ -357,6 +386,8 @@ local function _apply(names, enabled)
 
 	for i = 1, #names do
 		local name = names[i]
+		local recipe = recipe_details(name)
+		name = recipe and recipe.preference or name
 
 		disabled[name] = not enabled or nil
 		explicit[name] = enabled or nil

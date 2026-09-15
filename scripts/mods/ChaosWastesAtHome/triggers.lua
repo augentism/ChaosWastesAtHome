@@ -172,6 +172,9 @@ triggers.grant_named = function (buff_name, source)
 	if not buff_name or buff_name == "" then
 		return false, "no buff name given"
 	end
+	if mod.user_buffs and not mod.user_buffs.can_grant(buff_name) then
+		return false, "player-created buffs require a singleplay CWaH run (disable Realms hosting)"
+	end
 
 	local manager = mod.manager
 	local handler = manager and manager._mission_buffs_handler

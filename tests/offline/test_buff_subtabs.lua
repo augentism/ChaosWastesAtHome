@@ -49,7 +49,7 @@ local function fixture(a)
 		return { content = { hotspot = {} }, style = { text = {}, state_text = {}, icon = { material_values = {} } } }
 	end
 	local widgets = {}
-	for _, id in ipairs({ "subtab_buffs", "subtab_havoc", "title_text", "family_pick_button", "enable_all_button",
+	for _, id in ipairs({ "subtab_buffs", "subtab_havoc", "subtab_editor", "title_text", "family_pick_button", "enable_all_button",
 		"disable_all_button", "reset_all_button", "summary_text", "detail_panel", "detail_icon", "detail_modifier_icon",
 		"detail_title", "detail_subtitle", "detail_description", "detail_toggle_button" }) do widgets[id] = widget() end
 	local row = { pass_template = {}, size = {}, init = function (_, w, entry) w.content.entry = entry end }
@@ -73,6 +73,16 @@ local function fixture(a)
 end
 
 return {
+	{ "Rollable preview shows stable ID without changing Havoc descriptions", function (a)
+		local view, buffs = fixture(a)
+		buffs.details = function () return {title="Recipe",description="Effect",stable_id="my_recipe",icon="icon"} end
+		view._selected_buff="network_slot"
+		view:_refresh_details()
+		a.truthy(view._widgets_by_name.detail_description.content.text:find("my_recipe\n\nEffect",1,true))
+		view:cb_subtab_havoc()
+		view._selected_buff="havoc_one";view:_refresh_details()
+		a.eq(view._widgets_by_name.detail_description.content.text,"havoc_one")
+	end },
 	{ "buff menu defaults to buffs and repeated subtab switches keep one set of rows", function (a)
 		local view, buffs, havoc, registered = fixture(a)
 		a.eq(view._pool, buffs); a.eq(view._subtab, "buffs")

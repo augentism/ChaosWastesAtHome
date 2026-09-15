@@ -1,0 +1,23 @@
+[peer_precision]
+name = Peer Precision
+trigger = shoot
+effect = critical_strike_chance
+amount = 1
+max_stacks = 5
+duration = 8
+
+[peer_guard]
+name = Peer Guard
+trigger = block
+effect = damage_reduction
+amount = 2
+max_stacks = 3
+duration = 12
+
+[peer_haste]
+name = Peer Haste
+trigger = dodge
+effect = attack_speed
+amount = 2
+max_stacks = 4
+duration = 15
