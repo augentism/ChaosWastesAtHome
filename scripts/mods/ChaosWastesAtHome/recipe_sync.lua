@@ -77,6 +77,14 @@ local function receive(sender, payload)
 		local host = Managers.connection:host()
 		if tostring(sender):lower() ~= tostring(host):lower() or payload.kind ~= "manifest" then return end
 		if not waiting(r) then return end
+		-- Lost ACKs can cause retransmission: acknowledge the exact verified
+		-- manifest without reinstalling recipes or hashing the lookup again.
+		if state.ready and payload.protocol == 2 and payload.version == mod.version
+			and payload.text == state.text and payload.base == state.base
+			and payload.mapping == state.mapping and payload.revision == state.revision then
+			r.network_send(mod, RPC_NAME, "host", { kind = "ack", revision = state.revision, mapping = state.mapping })
+			return
+		end
 		if payload.protocol ~= 2 or payload.version ~= mod.version or type(payload.text) ~= "string" or #payload.text > 65536
 			or type(payload.base) ~= "string" or #payload.base > 80
 			or type(payload.mapping) ~= "string" or #payload.mapping > 80
@@ -135,6 +143,21 @@ end
 
 sync.status = function () return state.status end
 
+-- Identity messages describe installed recipes, not saved personal recipes.
+-- A host waits for this specific peer's ACK, not every other joining player.
+sync.identity_revision = function (peer)
+	local saved = mod._user_buffs
+	if not saved or not saved.deferred then return true, nil end
+	local r = realms()
+	local manager = Managers.connection
+	local connection = manager and (manager._connection_host or manager._connection_client)
+	if not r or not r._session.is_active() or state.connection ~= connection or not state.ready then
+		return false
+	end
+	if r._session.is_active_host() and state.peers[peer] ~= state.revision then return false end
+	return true, state.revision
+end
+
 sync.update = function (dt)
 	local r = realms()
 	local saved = mod._user_buffs
@@ -142,7 +165,7 @@ sync.update = function (dt)
 	if not state.registered then
 		local ok = r.network_register(mod, RPC_NAME, receive)
 		if not ok then return end
-		r.network_on_peer_left(mod, function (peer) state.peers[peer] = nil end)
+		-- net.lua owns the single Realms peer-left callback for both systems.
 		state.registered = true
 		-- Cover the real ready button AND host countdown/finalization. Merely
 		-- guarding the automated test would leave manual ready-up unsafe.
@@ -175,7 +198,13 @@ sync.update = function (dt)
 		connection.can_accept_peer = function (self, ...)
 			-- The native connection may open first; reject engine admission before
 			-- any gameplay units/buff IDs can reach an unsynchronized hot joiner.
-			if ((saved.saved_count or 0) > 0 or (saved.count or 0) > 0)
+			-- The frozen run catalogue excludes disabled definitions. Saved edits
+			-- belong to the next run and must neither enable nor lift this guard.
+			local run = mod._run
+			local catalogue = run and run.recipe_catalogue
+			if catalogue == nil then catalogue = state.text end
+			if catalogue == nil then catalogue = saved.installed_text end
+			if type(catalogue) == "string" and catalogue ~= ""
 				and (not waiting(r) or r._preparation.local_ready()) then
 				return false, "realms_server_private"
 			end
@@ -184,9 +213,13 @@ sync.update = function (dt)
 	end
 	if not mod:is_enabled() then state.ready = false; return end
 	if not r._session.is_active() and mod.user_buffs.allowed_session() then
-		state.base = lookup_signature(true)
-		local ok, err = mod.user_buffs.install_text(saved.local_text or "")
-		if not ok then fail(err) end
+		-- Solo has no peer to verify. Installation already tracks the active
+		-- catalogue; never fingerprint the entire lookup from the frame loop.
+		local text = saved.local_text or ""
+		if saved.installed_text ~= text then
+			local ok, err = mod.user_buffs.install_text(text)
+			if not ok then fail(err) end
+		end
 		return
 	end
 	if not waiting(r) then return end

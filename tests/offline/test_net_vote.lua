@@ -34,6 +34,56 @@ local function record(votes, order)
 end
 
 return {
+	{ "identity checks stop after a verdict and restart for reconnects or catalogue changes", function (a)
+		local old_get, old_managers = get_mod, Managers
+		local mod = harness.mod
+		local callbacks, left, sent, scans = {}, nil, 0, 0
+		local peers = { "peer" }
+		local r = {
+			network_register = function (_, name, fn) callbacks[name] = fn; return true end,
+			network_on_peer_left = function (_, fn) left = fn end,
+			network_is_available = function () return true end,
+			network_send = function () sent = sent + 1; return true end,
+			_gameplay_control = { ready_peer_ids = function () return peers end },
+		}
+		get_mod = function (name) if name == "Realms" then return r end; return old_get(name) end
+		Managers = { connection = { _connection_host = {} } }
+		mod._user_buffs = { generation = 1 }
+		mod.custom_buff_id_map = function () scans = scans + 1; return { "buff=1" } end
+		local ok, err = pcall(function ()
+			local net = load_net()
+			net.update(3); a.eq(scans, 1); a.eq(sent, 1)
+			net.update(3); a.eq(scans, 1); a.eq(sent, 2, "unanswered peer retried")
+			callbacks.cwah_ident_reply("peer", { version = mod.version, entries = { "buff=1" }, is_reply = true })
+			for i = 1, 100 do net.update(1) end
+			a.eq(scans, 1); a.eq(sent, 2)
+			mod._recipe_sync = { peers = { peer = "verified" } }
+			left("peer"); a.nil_(mod._recipe_sync.peers.peer)
+			net.update(3); a.eq(sent, 3)
+			callbacks.cwah_ident_reply("peer", { version = mod.version, entries = { "buff=2" }, is_reply = true })
+			for i = 1, 100 do net.update(1) end
+			a.eq(sent, 3, "mismatch is not retried")
+			mod._user_buffs.generation = 2
+			net.update(3); a.eq(scans, 2); a.eq(sent, 4)
+			Managers.connection._connection_host = {}
+			net.update(3); a.eq(scans, 3); a.eq(sent, 5)
+			left("peer")
+			local ready, revision = false, "host-a"
+			mod.recipe_sync = { identity_revision = function () return ready, revision end }
+			local payload = { version = mod.version, entries = { "buff=2" }, is_reply = true, recipe_revision = revision }
+			net.update(3); callbacks.cwah_ident_reply("peer", payload)
+			a.nil_(mod._net_state.peers.peer, "pending recipes are not rejected")
+			a.eq(scans, 3); a.eq(sent, 5)
+			ready, revision = true, "host-b"
+			callbacks.cwah_ident_reply("peer", payload)
+			a.nil_(mod._net_state.peers.peer, "stale host catalogue ignored")
+			payload.recipe_revision = revision
+			callbacks.cwah_ident_reply("peer", payload)
+			a.eq(mod._net_state.peers.peer.status, "mismatch", "real same-revision mismatch still rejected")
+		end)
+		get_mod, Managers = old_get, old_managers
+		if not ok then error(err, 0) end
+	end },
 	{ "a vote needs cards", function (a)
 		local net = load_net()
 

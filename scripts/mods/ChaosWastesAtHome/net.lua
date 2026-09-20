@@ -29,9 +29,8 @@ local RPC_VOTE = "cwah_vote"
 local RPC_CHOOSING = "cwah_choosing"
 local RPC_TALLY = "cwah_tally"
 
--- Re-sent on a timer as well as on becoming available: Realms' bus comes up
--- asynchronously after a peer connects, and a send into a channel that is not
--- ready yet is refused rather than queued.
+-- Unanswered handshakes retry: Realms' bus comes up asynchronously after a
+-- peer connects. Once a verdict exists, no periodic identity send is needed.
 local RETRY_SECONDS = 3
 
 -- State lives on the mod table, not in file locals. io_dofile re-executes this
@@ -75,6 +74,12 @@ end
 -- loader would be a second registration. The main script owns the one instance
 -- and parks the accessor.
 local function _local_entries()
+	local lookup = NetworkLookup and NetworkLookup.buff_templates
+	local generation = mod._user_buffs and mod._user_buffs.generation
+	if state.local_entries and state.lookup == lookup and state.lookup_size == (lookup and #lookup)
+		and state.generation == generation then
+		return state.local_entries
+	end
 	if not mod.custom_buff_id_map then
 		return nil
 	end
@@ -85,6 +90,8 @@ local function _local_entries()
 		return nil
 	end
 
+	state.lookup, state.lookup_size = lookup, lookup and #lookup
+	state.generation, state.local_entries = generation, entries
 	return entries
 end
 
@@ -139,6 +146,7 @@ local function _set_peer(peer_id, status, detail)
 		mod:info("peer %s verified: same version and the same %s buff ids",
 			tostring(peer_id), tostring(detail))
 	else
+		state.identity_rejections = (state.identity_rejections or 0) + 1
 		mod:error("peer %s REJECTED for custom buffs: %s", tostring(peer_id), tostring(detail))
 		mod:echo(mod:localize("net_peer_mismatch", tostring(peer_id)))
 	end
@@ -150,7 +158,18 @@ end
 
 -- Whoever receives an ident compares it and answers with their own, so the
 -- exchange is symmetric and either side can be the one that notices.
+local function _identity_revision(peer)
+	local sync = mod.recipe_sync
+	if sync and sync.identity_revision then return sync.identity_revision(peer) end
+	return not (mod._user_buffs and mod._user_buffs.deferred), nil
+end
+
 local function _on_ident(sender_peer_id, payload)
+	local ready, revision = _identity_revision(sender_peer_id)
+	if not ready then return end
+	-- An in-flight identity from the previous catalogue is not a rejection.
+	-- Unanswered peers retry after recipe synchronization completes.
+	if revision and type(payload) == "table" and payload.recipe_revision ~= revision then return end
 	local ours = _local_entries()
 
 	if not ours then
@@ -188,6 +207,7 @@ local function _on_ident(sender_peer_id, payload)
 	if realms then
 		realms.network_send(mod, RPC_IDENT_REPLY, sender_peer_id, {
 			version = mod.version,
+			recipe_revision = revision,
 			entries = ours,
 			accepted = matched,
 			is_reply = true,
@@ -855,9 +875,8 @@ end
 -- a support command that lists people who left an hour ago is worse than no
 -- command.
 --
--- Called from the sweep in net.update rather than from a disconnect hook: Realms
--- owns the disconnect callback and this mod does not, so comparing against its
--- peer list is the reachable answer.
+-- Called by the shared Realms peer-left callback. The gameplay-ready list is
+-- not authoritative in preparation and must not erase lobby verdicts.
 net.forget_peer = function (peer_id)
 	state.choosing[peer_id] = nil
 	state.peers[peer_id] = nil
@@ -913,6 +932,14 @@ net.install = function ()
 	end
 
 	state.registered = true
+	if realms.network_on_peer_left then
+		-- Realms stores ONE callback per mod; recipe sync shares this owner.
+		realms.network_on_peer_left(mod, function (peer)
+			net.forget_peer(peer)
+			local recipes = mod._recipe_sync
+			if recipes then recipes.peers[peer] = nil end
+		end)
+	end
 
 	mod:info("peer identity RPCs registered with Realms")
 
@@ -937,33 +964,31 @@ net.update = function (dt)
 		return
 	end
 
-	-- Drop anyone Realms no longer lists. Cheap: a handful of keys against a
-	-- party of at most four.
-	local present = {}
+	-- A new connection or catalogue needs a new verdict. These are cheap
+	-- identity/revision checks, not per-frame lookup serialization.
+	local connection_manager = Managers.connection
+	local connection = connection_manager and (connection_manager._connection_host or connection_manager._connection_client)
+	local lookup = NetworkLookup and NetworkLookup.buff_templates
+	local generation = mod._user_buffs and mod._user_buffs.generation
+	if state.connection ~= connection or state.checked_lookup ~= lookup
+		or state.checked_size ~= (lookup and #lookup) or state.checked_generation ~= generation then
+		state.connection, state.checked_lookup = connection, lookup
+		state.checked_size, state.checked_generation = lookup and #lookup, generation
+		state.peers, state.local_entries = {}, nil
+		state.accum = RETRY_SECONDS
+	end
+	-- Do not prune preparation-lobby verdicts using the gameplay-only list.
+	-- Realms' disconnect callback owns removal.
 	local peers = net.peer_ids()
-
-	for i = 1, #peers do
-		present[peers[i]] = true
-	end
-
-	for peer_id in pairs(state.peers) do
-		if not present[peer_id] then
-			net.forget_peer(peer_id)
+	local prep = realms._preparation
+	if prep and prep.is_waiting and prep.is_waiting() and connection then
+		peers = {}
+		if connection_manager._connection_host and connection.connected_peers then
+			for _, peer in pairs(connection:connected_peers()) do peers[#peers + 1] = peer end
+		elseif connection_manager.host then
+			local host = connection_manager:host()
+			if host then peers[1] = host end
 		end
-	end
-
-	local entries = _local_entries()
-
-	if not entries then
-		return
-	end
-
-	if not state.announced then
-		state.announced = true
-		state.local_entries = entries
-
-		mod:info("custom buff ids on this machine (%d): %s",
-			#entries, table.concat(entries, " "))
 	end
 
 	state.accum = state.accum + (dt or 0)
@@ -974,14 +999,16 @@ net.update = function (dt)
 
 	state.accum = 0
 
-	-- Broadcast rather than tracking who has answered. Realms filters the send
-	-- against each peer's capability manifest, so a peer without this mod is
-	-- skipped rather than errored, and re-identing a matched peer costs a few
-	-- hundred bytes every few seconds.
-	realms.network_send(mod, RPC_IDENT, "others", {
-		version = mod.version,
-		entries = entries,
-	})
+	-- Retry only unanswered handshakes. Both success and mismatch are final
+	-- for this connection/catalogue; repeating a mismatch cannot repair IDs.
+	for _, peer in ipairs(peers) do
+		local ready, revision = _identity_revision(peer)
+		if ready and not state.peers[peer] then
+			local entries = _local_entries()
+			if not entries then return end
+			realms.network_send(mod, RPC_IDENT, peer, { version = mod.version, entries = entries, recipe_revision = revision })
+		end
+	end
 end
 
 -- ---------------------------------------------------------------------------

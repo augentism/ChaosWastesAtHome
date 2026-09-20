@@ -1459,6 +1459,9 @@ mod:hook(ConstantElementMissionBuffs, "_update_timers_state", function (func, se
 	end
 end)
 
+mod:io_dofile("ChaosWastesAtHome/scripts/mods/ChaosWastesAtHome/lesser_boon_notification").install(
+	ConstantElementMissionBuffs, require("scripts/settings/buff/hordes_buffs/hordes_buffs_data"))
+
 mod:hook(ConstantElementMissionBuffs, "_is_player_in_mission", function (func, self)
 	if mod.manager and self._current_game_mode == "coop_complete_objective" then
 		return true

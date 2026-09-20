@@ -138,6 +138,7 @@ local FILES = {
 	"test_shared_hooks",
 	"test_dreyko",
 	"test_pause_audio",
+	"test_lesser_boon_notification",
 	"test_particle_guard",
 	"test_spawn_guard",
 	"test_game_mode_shim",

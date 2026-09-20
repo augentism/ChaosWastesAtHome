@@ -41,6 +41,24 @@ local function with_host(test)
 end
 
 return {
+	{ "solo updates neither hash the lookup nor reinstall unchanged recipes", function (a)
+		with_host(function (sync)
+			local mod = harness.mod
+			get_mod("Realms")._session.is_active = function () return false end
+			mod.user_buffs.allowed_session = function () return true end
+			mod._user_buffs.installed_text = ""
+			local installs = 0
+			mod.user_buffs.install_text = function (text)
+				installs = installs + 1; mod._user_buffs.installed_text = text; return true
+			end
+			NetworkLookup.buff_templates = { {} } -- hashing this would throw
+			for i = 1, 100 do sync.update(0.016) end
+			a.eq(installs, 0)
+			mod._user_buffs.local_text = "edited"
+			sync.update(0.016); sync.update(0.016)
+			a.eq(installs, 1)
+		end)
+	end },
 	{ "clients lock a catalogue per connection but accept a different host after reconnect", function (a)
 		with_host(function (sync, _, receive, sent)
 			local r = get_mod("Realms")
@@ -56,6 +74,7 @@ return {
 			a.falsy(sync.ready())
 			receive(manifest, "stranger"); a.eq(installs, 0)
 			receive(manifest, "host_a"); a.truthy(sync.ready()); a.eq(installs, 1)
+			receive(manifest, "host_a"); a.eq(installs, 1, "duplicate manifest only re-acks")
 			local different = table.shallow_copy(manifest)
 			different.text = "b"
 			-- The same rolling fingerprint as the protocol, for one byte.
@@ -71,6 +90,7 @@ return {
 	end },
 	{ "ready button and host finalization wait for exact peer acknowledgement", function (a)
 		with_host(function (sync, hooks, receive, sent)
+			a.falsy(sync.identity_revision("peer"), "host must wait for peer recipe ACK")
 			a.falsy(sync.ready()); a.eq(sent[1][1], "peer")
 			local calls = 0
 			local function original() calls = calls + 1; return true end
@@ -80,11 +100,15 @@ return {
 			receive({kind="ack",revision=manifest.revision,mapping=manifest.mapping}, "stranger")
 			a.falsy(sync.ready())
 			receive({kind="ack",revision=manifest.revision,mapping=manifest.mapping})
+			local verified, revision = sync.identity_revision("peer")
+			a.truthy(verified); a.eq(revision, manifest.revision)
+			a.falsy(sync.identity_revision("new_peer"))
 			a.truthy(sync.ready()); a.truthy(hooks.perform_action(original)); a.eq(calls, 1)
 		end)
 	end },
 	{ "recipe hosts refuse in-progress admission and new peers close the barrier", function (a)
 		with_host(function (sync, _, receive, sent, connection, set_waiting, peers)
+			harness.mod._recipe_sync.text = "active recipe catalogue"
 			local manifest = sent[1][2]
 			receive({kind="ack",revision=manifest.revision,mapping=manifest.mapping})
 			a.truthy(sync.ready()); a.truthy(connection:can_accept_peer("peer"))
@@ -92,6 +116,28 @@ return {
 			set_waiting(false)
 			local allowed, reason = connection:can_accept_peer("new_peer")
 			a.falsy(allowed); a.eq(reason, "realms_server_private")
+		end)
+	end },
+	{ "empty active catalogue allows admission despite disabled saved recipes and later edits", function (a)
+		with_host(function (_, _, _, _, connection, set_waiting)
+			local mod = harness.mod
+			mod._run = { recipe_catalogue = "" }
+			mod._user_buffs.saved_count = 3
+			mod._user_buffs.local_text = "new recipes saved for next run"
+			mod._user_buffs.count = 3 -- stale registration must not override the snapshot
+			set_waiting(false)
+			a.truthy(connection:can_accept_peer("returning_peer"))
+			a.truthy(connection:can_accept_peer("new_peer"))
+		end)
+	end },
+	{ "active recipes still block admission after personal recipes are removed", function (a)
+		with_host(function (_, _, _, _, connection, set_waiting)
+			local mod = harness.mod
+			mod._run = { recipe_catalogue = "active recipe catalogue" }
+			mod._user_buffs.saved_count, mod._user_buffs.count = 0, 0
+			mod._user_buffs.local_text = ""
+			set_waiting(false)
+			a.falsy(connection:can_accept_peer("returning_peer"))
 		end)
 	end },
 }

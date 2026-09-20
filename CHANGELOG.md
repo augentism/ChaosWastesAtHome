@@ -1,6 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- Defer peer identity comparisons until that peer's recipe synchronization is
+  complete, and ignore identity messages from an old catalogue revision. This
+  prevents false rejection warnings on initial join and when switching hosts.
+
+- Removed per-frame solo recipe fingerprinting. Buff identity handshakes cache
+  their ID lists and retry only unanswered peers, retaining success/mismatch
+  verdicts until disconnect or catalogue changes. Duplicate recipe manifests
+  are acknowledged without reinstalling and rehashing the catalogue.
+
+- Automatic family-buff acquisition popups now appear in the upper-left,
+  following the Korean fork's layout. Interactive choices remain centered.
+
 ## 1.5.0
+
+- Mid-mission recipe admission checks use the frozen active catalogue rather
+  than saved-definition counts. Disabled personal recipes no longer block
+  joins/reconnects into recipe-free runs, and mid-run saved edits cannot change
+  the restriction. Rollable Buffs exclusions do not unregister recipes.
 
 - Build player buffs from 40 triggers and 49 effects, with configurable strength,
   stack cap, duration, proc chance and cooldown. Up to 64 saved definitions.

@@ -170,6 +170,13 @@ These bounds prevent runaway values from a misplaced decimal or stack count.
 
 ## Multiplayer boundary
 
+The mid-mission recipe join restriction applies only when the frozen active
+catalogue contains recipes. Unchecking **Include in your catalogue** for every
+recipe before starting a new run removes this restriction, even if disabled
+definitions remain saved. Rollable Buffs toggles only affect reward selection;
+they do not remove recipes from the catalogue. Saving edits during a run does
+not change its admission policy. Other Realms admission checks still apply.
+
 Realms runs use **only the host's catalogue**. Each player's `buffs.txt` is read
 at startup and is immediately visible in the Player Buffs menu. With Realms
 installed, startup reserves 64 dormant card/helper slot pairs, independently of
