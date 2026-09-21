@@ -217,6 +217,9 @@ sync.update = function (dt)
 		-- catalogue; never fingerprint the entire lookup from the frame loop.
 		local text = saved.local_text or ""
 		if saved.installed_text ~= text then
+			-- A live solo hub also owns gameplay extensions. Saved edits are
+			-- pending, not failures; wait until those systems are gone.
+			if not mod.user_buffs.can_replace() then return end
 			local ok, err = mod.user_buffs.install_text(text)
 			if not ok then fail(err) end
 		end

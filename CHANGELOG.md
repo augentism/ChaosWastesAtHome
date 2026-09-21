@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.5.1
+
+Realms players should update every participant to 1.5.1. Matching buff packs
+and network IDs are still required; genuine incompatibilities remain blocked.
 
 - Fixed zero family/legendary mission limits being treated as unlimited.
   Disabled reward types cannot be granted by fallback; separately configured

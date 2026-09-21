@@ -29,7 +29,8 @@ local function with_host(test)
 	mod.hook = function (_, _, name, callback) hooks[name] = callback end
 	mod.custom_buff_id_map = function () return {} end
 	mod._user_buffs = { deferred = true, local_text = "", saved_count = 3, count = 0 }
-	mod.user_buffs = { install_text = function () return true end, allowed_session = function () return false end }
+	mod.user_buffs = { install_text = function () return true end, allowed_session = function () return false end,
+		can_replace = function () return true end }
 	local ok, err = pcall(function ()
 		local sync = harness.load("recipe_sync")
 		sync.update(1)
@@ -41,6 +42,40 @@ local function with_host(test)
 end
 
 return {
+	{ "solo editor saves wait quietly for safe replacement then install once", function (a)
+		with_host(function (sync)
+			local mod = harness.mod
+			get_mod("Realms")._session.is_active = function () return false end
+			mod.user_buffs.allowed_session = function () return true end
+			mod._user_buffs.installed_text, mod._user_buffs.local_text = "original", "edited"
+			local safe, installs = false, 0
+			mod.user_buffs.can_replace = function () return safe end
+			mod.user_buffs.install_text = function (text)
+				installs = installs + 1; mod._user_buffs.installed_text = text; return true
+			end
+			local status = sync.status()
+			NetworkLookup.buff_templates = { {} } -- pending edits must not hash either
+			for i = 1, 100 do sync.update(0.016) end
+			a.eq(installs, 0); a.eq(sync.status(), status)
+			a.eq(mod._user_buffs.installed_text, "original")
+			mod._user_buffs.local_text = "latest edit"
+			safe = true
+			for i = 1, 100 do sync.update(0.016) end
+			a.eq(installs, 1); a.eq(mod._user_buffs.installed_text, "latest edit")
+		end)
+	end },
+	{ "solo installation failures still report errors once replacement is safe", function (a)
+		with_host(function (sync)
+			local mod = harness.mod
+			get_mod("Realms")._session.is_active = function () return false end
+			mod.user_buffs.allowed_session = function () return true end
+			mod._user_buffs.installed_text, mod._user_buffs.local_text = "original", "edited"
+			mod.user_buffs.install_text = function () return false, "invalid catalogue" end
+			sync.update(0.016)
+			a.eq(sync.status(), "invalid catalogue")
+			a.eq(mod._user_buffs.installed_text, "original")
+		end)
+	end },
 	{ "solo updates neither hash the lookup nor reinstall unchanged recipes", function (a)
 		with_host(function (sync)
 			local mod = harness.mod
