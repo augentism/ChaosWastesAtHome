@@ -127,6 +127,44 @@ local function reward_fixture()
 end
 
 return {
+	{ "zero reward limits disable both direct grants and trigger fallbacks", function (a)
+		local f = reward_fixture()
+		f.settings.max_family_buffs = 0
+		f.settings.max_legendary_choices = 0
+		a.falsy(f.triggers.grant_family(false))
+		a.falsy(f.triggers.grant_legendary(false))
+		for _, kind in ipairs({ "family", "legendary", "random" }) do
+			a.falsy(f.triggers.fire("shrines", "disabled", { grant = kind, chance = 100 }))
+		end
+		a.eq(#f.events, 0)
+	end },
+	{ "five legendary picks with zero family limit never fall back to automatic buffs", function (a)
+		local f = reward_fixture()
+		f.settings.max_family_buffs = 0
+		f.settings.max_legendary_choices = 5
+		for i = 1, 5 do
+			a.truthy(f.triggers.fire("time", "timer", { grant = "legendary", chance = 100 }))
+		end
+		a.falsy(f.triggers.fire("time", "capped", { grant = "legendary", chance = 100 }))
+		a.eq(#f.events, 5)
+		a.eq(f.triggers.stats().family_granted, 0)
+	end },
+	{ "disabled legendary picks can only fall back within the family limit", function (a)
+		local f = reward_fixture(); f.settings.max_legendary_choices = 0
+		a.truthy(f.triggers.fire("shrines", "fallback", { grant = "legendary", chance = 100 }))
+		a.falsy(f.triggers.fire("shrines", "capped", { grant = "legendary", chance = 100 }))
+		a.eq(f.triggers.stats().family_granted, 1)
+		a.eq(f.triggers.stats().legendary_granted, 0)
+	end },
+	{ "starting hand stays separate from zero mission reward limits", function (a)
+		local f = reward_fixture()
+		f.settings.max_family_buffs = 0; f.settings.max_legendary_choices = 0
+		a.truthy(f.triggers.grant_family(true))
+		a.truthy(f.triggers.grant_legendary(true))
+		a.falsy(f.triggers.grant_family(false))
+		a.falsy(f.triggers.grant_legendary(false))
+		a.eq(#f.events, 2)
+	end },
 	{ "normal altar activation survives immediate interaction-module destruction", function (a)
 		local f = fixture(); f.setup(); local level = {}
 		f.activate(level); f.destroy_module(level)

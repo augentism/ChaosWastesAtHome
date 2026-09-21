@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed zero family/legendary mission limits being treated as unlimited.
+  Disabled reward types cannot be granted by fallback; separately configured
+  starting-hand rewards remain outside the mission limits.
+
 - Defer peer identity comparisons until that peer's recipe synchronization is
   complete, and ignore identity messages from an old catalogue revision. This
   prevents false rejection warnings on initial join and when switching hosts.

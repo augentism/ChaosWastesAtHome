@@ -235,7 +235,7 @@ triggers.grant_family = function (off_budget, source, detail)
 
 	local budget = mod:get("max_family_buffs") or 0
 
-	if not off_budget and budget > 0
+	if not off_budget
 		and state.family_granted - state.starting_family_given >= budget then
 		return false
 	end
@@ -275,7 +275,7 @@ triggers.grant_legendary = function (off_budget, source, detail)
 
 	local budget = mod:get("max_legendary_choices") or 0
 
-	if not off_budget and budget > 0
+	if not off_budget
 		and state.legendary_granted - state.starting_legendary_given >= budget then
 		return false
 	end
